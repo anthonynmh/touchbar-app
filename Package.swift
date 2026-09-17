@@ -40,6 +40,11 @@ let package = Package(
             name: "SnappyNestCoreTests",
             dependencies: ["SnappyNestCore"],
             path: "Tests/SnappyNestCoreTests"
+        ),
+        .testTarget(
+            name: "SnappyNestUITests",
+            dependencies: ["SnappyNestUI"],
+            path: "Tests/SnappyNestUITests"
         )
     ]
 )

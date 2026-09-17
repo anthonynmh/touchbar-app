@@ -5,9 +5,12 @@ import SnappyNestUI
 final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var statusItem: NSStatusItem!
+    private var toggleOverlayMenuItem: NSMenuItem!
+    private var presentationStatusMenuItem: NSMenuItem!
     private var renderer: SceneRenderer!
     private var presenter: TouchBarPresenter!
     private var preferPersistent = true
+    private var didShowPresentationFailure = false
 
     private var clock: ClockProvider!
     private var battery: BatteryProvider!
@@ -57,8 +60,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         renderer.onVolumeChange     = { [weak self] v in self?.volume.set(v) }
         renderer.onTogglePlayPause  = { [weak self] in self?.activeSource().togglePlayPause() }
 
-        installPresenter()
         installMenuBar()
+        installPresenter()
         startTimers()
         renderOnce()
     }
@@ -66,17 +69,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func installPresenter() {
         if preferPersistent {
             let p = PersistentPresenter(rendererView: renderer)
-            if p.capabilityReady {
-                presenter = p
-                p.install()
-                NSLog("[SnappyNest] presenter=persistent installed=\(p.isInstalled)")
-                return
-            }
+            presenter = p
+        } else {
+            presenter = AppFrontmostPresenter(rendererView: renderer)
         }
-        let f = AppFrontmostPresenter(rendererView: renderer)
-        presenter = f
-        f.install()
-        NSLog("[SnappyNest] presenter=app-frontmost installed=\(f.isInstalled)")
+        presenter.stateDidChange = { [weak self] state in
+            self?.presentationStateDidChange(state)
+        }
+        presenter.install()
     }
 
     private func installMenuBar() {
@@ -84,12 +84,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.button?.title = "🐾"
         let menu = NSMenu()
         menu.addItem(withTitle: "Snappy Nest", action: nil, keyEquivalent: "").isEnabled = false
+        presentationStatusMenuItem = NSMenuItem(
+            title: "Touch Bar: Starting…",
+            action: nil,
+            keyEquivalent: ""
+        )
+        presentationStatusMenuItem.isEnabled = false
+        menu.addItem(presentationStatusMenuItem)
         menu.addItem(NSMenuItem.separator())
 
         let toggle = NSMenuItem(title: "Hide Touch Bar Overlay", action: #selector(toggleOverlay), keyEquivalent: "\\")
         toggle.keyEquivalentModifierMask = [.command, .option]
         toggle.target = self
         menu.addItem(toggle)
+        toggleOverlayMenuItem = toggle
 
         let preview = NSMenuItem(title: "Enlarged Preview…", action: #selector(showPreview), keyEquivalent: "P")
         preview.target = self
@@ -182,15 +190,67 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func toggleOverlay() {
-        if presenter.isInstalled {
+        if presenter.state.isPresentationRequested {
             presenter.uninstall()
-            statusItem.button?.title = "🐾💤"
-            (statusItem.menu?.item(withTitle: "Hide Touch Bar Overlay"))?.title = "Show Touch Bar Overlay"
         } else {
             presenter.install()
-            statusItem.button?.title = "🐾"
-            (statusItem.menu?.item(withTitle: "Show Touch Bar Overlay"))?.title = "Hide Touch Bar Overlay"
             renderOnce()
+        }
+    }
+
+    private func presentationStateDidChange(_ state: TouchBarPresentationState) {
+        switch state {
+        case .idle:
+            presentationStatusMenuItem?.title = "Touch Bar: Idle"
+        case .installing:
+            statusItem?.button?.title = "🐾…"
+            toggleOverlayMenuItem?.title = "Hide Touch Bar Overlay"
+            presentationStatusMenuItem?.title = "Touch Bar: Installing…"
+            NSLog("[SnappyNest] presenter state=installing")
+        case let .visible(geometry):
+            statusItem?.button?.title = "🐾"
+            toggleOverlayMenuItem?.title = "Hide Touch Bar Overlay"
+            presentationStatusMenuItem?.title = String(
+                format: "Touch Bar: Persistent %.0f×%.0f @ %.1f×",
+                geometry.width, geometry.height, geometry.backingScale
+            )
+            NSLog("[SnappyNest] presenter state=visible")
+        case let .fallback(geometry):
+            statusItem?.button?.title = "🐾⚠︎"
+            toggleOverlayMenuItem?.title = "Hide Touch Bar Overlay"
+            presentationStatusMenuItem?.title = String(
+                format: "Touch Bar: App-frontmost %.0f×%.0f @ %.1f×",
+                geometry.width, geometry.height, geometry.backingScale
+            )
+            NSLog("[SnappyNest] presenter state=fallback")
+        case .hidden:
+            statusItem?.button?.title = "🐾💤"
+            toggleOverlayMenuItem?.title = "Show Touch Bar Overlay"
+            presentationStatusMenuItem?.title = "Touch Bar: Hidden"
+            NSLog("[SnappyNest] presenter state=hidden")
+        case let .failed(reason):
+            statusItem?.button?.title = "🐾⚠︎"
+            toggleOverlayMenuItem?.title = "Show Touch Bar Overlay"
+            presentationStatusMenuItem?.title = "Touch Bar: Not visible"
+            presentationStatusMenuItem?.toolTip = reason
+            NSLog("[SnappyNest] presenter state=failed reason=\(reason)")
+            showPresentationFailureOnce(reason: reason)
+        }
+    }
+
+    private func showPresentationFailureOnce(reason: String) {
+        guard !didShowPresentationFailure else { return }
+        didShowPresentationFailure = true
+
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Snappy Nest could not open the Touch Bar"
+        alert.informativeText = "Neither the persistent presenter nor the app-frontmost fallback became visible (\(reason)). Use 🐾 → Enlarged Preview to inspect the world, then run ./Install/run-probe.sh 02 from the source checkout for Touch Bar diagnostics."
+        alert.addButton(withTitle: "Open Enlarged Preview")
+        alert.addButton(withTitle: "Dismiss")
+        NSApp.activate(ignoringOtherApps: true)
+        if alert.runModal() == .alertFirstButtonReturn {
+            showPreview()
         }
     }
 
