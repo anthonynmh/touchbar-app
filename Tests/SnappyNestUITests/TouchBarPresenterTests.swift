@@ -4,7 +4,7 @@ import XCTest
 
 final class TouchBarPresenterTests: XCTestCase {
     private let geometry = TouchBarPresentationGeometry(
-        width: 685,
+        width: 1004,
         height: 30,
         backingScale: 2
     )
@@ -125,7 +125,7 @@ final class TouchBarPresenterTests: XCTestCase {
     }
 
     private func makeRenderer() -> SceneRenderer {
-        SceneRenderer(frame: NSRect(x: 0, y: 0, width: 685, height: 30))
+        SceneRenderer(frame: NSRect(x: 0, y: 0, width: 1085, height: 30))
     }
 }
 

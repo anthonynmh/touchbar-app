@@ -25,7 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var spriteTimer: Timer?
     private var preview: EnlargedPreviewWindow?
 
-    private let touchBarBounds = NSRect(x: 0, y: 0, width: 685, height: 30)
+    private var touchBarBounds = NSRect(x: 0, y: 0, width: 1085, height: 30)
     private let seed: UInt64 = 0xC0FF_EECA_FED0_0DF0
 
     private enum MediaChoice: String { case auto, spotify, browser }
@@ -208,6 +208,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             presentationStatusMenuItem?.title = "Touch Bar: Installing…"
             NSLog("[SnappyNest] presenter state=installing")
         case let .visible(geometry):
+            adoptMeasuredGeometry(geometry)
             statusItem?.button?.title = "🐾"
             toggleOverlayMenuItem?.title = "Hide Touch Bar Overlay"
             presentationStatusMenuItem?.title = String(
@@ -216,6 +217,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )
             NSLog("[SnappyNest] presenter state=visible")
         case let .fallback(geometry):
+            adoptMeasuredGeometry(geometry)
             statusItem?.button?.title = "🐾⚠︎"
             toggleOverlayMenuItem?.title = "Hide Touch Bar Overlay"
             presentationStatusMenuItem?.title = String(
@@ -236,6 +238,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSLog("[SnappyNest] presenter state=failed reason=\(reason)")
             showPresentationFailureOnce(reason: reason)
         }
+    }
+
+    private func adoptMeasuredGeometry(_ geometry: TouchBarPresentationGeometry) {
+        let measuredBounds = NSRect(
+            x: 0,
+            y: 0,
+            width: geometry.width,
+            height: geometry.height
+        )
+        guard measuredBounds != touchBarBounds ||
+              composer.layout.backingScale != geometry.backingScale else { return }
+
+        let oldMiddle = composer.layout.regions.middle
+        let oldState = pet.state
+        let oldFraction = min(1, max(0,
+            (oldState.position.x - oldMiddle.minX) / max(1, oldMiddle.width)
+        ))
+        let layout = LayoutEngine(
+            bounds: measuredBounds,
+            backingScale: geometry.backingScale
+        )
+        var resizedState = oldState
+        resizedState.position.x = layout.petGroundX(
+            fraction: Double(oldFraction),
+            spriteHalfWidth: 8
+        )
+        resizedState.position.y = layout.regions.middle.maxY - 4
+
+        touchBarBounds = measuredBounds
+        composer = SceneComposer(layout: layout)
+        pet = PetController(
+            seed: seed,
+            layout: layout,
+            initial: resizedState
+        )
+        NSLog(
+            "[SnappyNest] scene layout width=%.1f height=%.1f backingScale=%.2f",
+            geometry.width, geometry.height, geometry.backingScale
+        )
+        renderOnce()
     }
 
     private func showPresentationFailureOnce(reason: String) {

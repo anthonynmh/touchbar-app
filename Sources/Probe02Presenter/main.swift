@@ -11,6 +11,7 @@ import Darwin
 
 typealias DFRPresence = @convention(c) (CFString, Bool) -> Void
 
+private let fullTouchBarWidth: CGFloat = 1085
 private let trayIdentifier = "com.local.snappy-nest.probe02.tray"
 private let rendererIdentifier = NSTouchBarItem.Identifier("com.local.snappy-nest.probe02.renderer")
 
@@ -98,21 +99,21 @@ final class ModalProbeView: NSView {
     private func reportAttachmentIfReady() {
         guard !hasReportedAttachment,
               let window,
-              bounds.width > 0, bounds.height > 0,
+              visibleRect.width > 0, visibleRect.height > 0,
               window.frame.width > 0, window.frame.height > 0 else { return }
         if let lastGeometry,
-           lastGeometry.bounds == bounds,
+           lastGeometry.bounds == visibleRect,
            lastGeometry.scale == window.backingScaleFactor {
             stableSampleCount += 1
         } else {
-            lastGeometry = (bounds, window.backingScaleFactor)
+            lastGeometry = (visibleRect, window.backingScaleFactor)
             stableSampleCount = 1
         }
         guard stableSampleCount >= 3 else { return }
         hasReportedAttachment = true
         pollTimer?.invalidate()
         pollTimer = nil
-        didAttach?(bounds, window.backingScaleFactor)
+        didAttach?(visibleRect, window.backingScaleFactor)
     }
 }
 
@@ -152,10 +153,12 @@ final class ProbeDelegate: NSObject, NSApplicationDelegate, NSTouchBarDelegate {
         anchor.frame = NSRect(x: 0, y: 0, width: 28, height: 30)
         tray.view = anchor
 
-        let view = ModalProbeView(frame: NSRect(x: 0, y: 0, width: 685, height: 30))
+        let view = ModalProbeView(
+            frame: NSRect(x: 0, y: 0, width: fullTouchBarWidth, height: 30)
+        )
         view.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
-            view.widthAnchor.constraint(equalToConstant: 685),
+            view.widthAnchor.constraint(equalToConstant: fullTouchBarWidth),
             view.heightAnchor.constraint(equalToConstant: 30)
         ])
         view.didAttach = { [weak self] bounds, scale in

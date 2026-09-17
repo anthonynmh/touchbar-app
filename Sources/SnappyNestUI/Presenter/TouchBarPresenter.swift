@@ -1,6 +1,8 @@
 import AppKit
 import Darwin
 
+private let physicalTouchBarSize = NSSize(width: 1085, height: 30)
+
 public struct TouchBarPresentationGeometry: Equatable, Sendable {
     public let width: CGFloat
     public let height: CGFloat
@@ -97,13 +99,13 @@ final class SystemTouchBarAttachmentMonitor: TouchBarAttachmentMonitoring {
 
         func inspect() -> Bool {
             guard let window = view.window,
-                  view.bounds.width > 0, view.bounds.height > 0,
+                  view.visibleRect.width > 0, view.visibleRect.height > 0,
                   window.frame.width > 0, window.frame.height > 0 else {
                 return false
             }
             let geometry = TouchBarPresentationGeometry(
-                width: view.bounds.width,
-                height: view.bounds.height,
+                width: view.visibleRect.width,
+                height: view.visibleRect.height,
                 backingScale: window.backingScaleFactor
             )
             if geometry == lastGeometry {
@@ -200,11 +202,11 @@ public final class AppFrontmostPresenter: NSObject, TouchBarPresenter {
         let installGeneration = generation
         setState(.installing)
 
-        rendererView.frame = NSRect(x: 0, y: 0, width: 685, height: 30)
+        rendererView.frame = NSRect(origin: .zero, size: physicalTouchBarSize)
         rendererView.translatesAutoresizingMaskIntoConstraints = false
         rendererConstraints = [
-            rendererView.widthAnchor.constraint(equalToConstant: 685),
-            rendererView.heightAnchor.constraint(equalToConstant: 30)
+            rendererView.widthAnchor.constraint(equalToConstant: physicalTouchBarSize.width),
+            rendererView.heightAnchor.constraint(equalToConstant: physicalTouchBarSize.height)
         ]
         NSLayoutConstraint.activate(rendererConstraints)
         let item = NSCustomTouchBarItem(identifier: itemIdentifier)
@@ -484,11 +486,11 @@ public final class PersistentPresenter: NSObject, TouchBarPresenter {
         tray.view = anchor
         tray.customizationLabel = "Snappy Nest"
 
-        rendererView.frame = NSRect(x: 0, y: 0, width: 685, height: 30)
+        rendererView.frame = NSRect(origin: .zero, size: physicalTouchBarSize)
         rendererView.translatesAutoresizingMaskIntoConstraints = false
         rendererConstraints = [
-            rendererView.widthAnchor.constraint(equalToConstant: 685),
-            rendererView.heightAnchor.constraint(equalToConstant: 30)
+            rendererView.widthAnchor.constraint(equalToConstant: physicalTouchBarSize.width),
+            rendererView.heightAnchor.constraint(equalToConstant: physicalTouchBarSize.height)
         ]
         NSLayoutConstraint.activate(rendererConstraints)
         let rendererItem = NSCustomTouchBarItem(identifier: rendererIdentifier)

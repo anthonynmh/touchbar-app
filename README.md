@@ -49,7 +49,8 @@ Measured on this Mac on 2026-09-18 (macOS 26.6.2, `MacBookPro17,1`, `TouchBarSer
 Re-run any probe with `./Install/run-probe.sh 0N` after building.
 
 - **01 · Touch Bar render (bounds + backing scale):** ✅ ok · Touch Bar window
-  is **685.0 × 30.0 pt @ 2.00× backing** (= 1370 × 60 physical px). Custom
+  app-control region is **685.0 × 30.0 pt @ 2.00× backing** (= 1370 × 60
+  physical px). This is not the end-to-end panel width. Custom
   `NSCustomTouchBarItem` + layer-backed `NSView` renders end-to-end.
   `NSTouchBar` responder chain resolves the item ~7 ms after `window.touchBar`
   is assigned to the key window, once the Touch Bar service is warm; cold-start
@@ -57,15 +58,19 @@ Re-run any probe with `./Install/run-probe.sh 0N` after building.
   requires a proper `.app` bundle + `open` — plain command-line executables
   don't activate.
 - **02 · Persistent presenter (DFRFoundation + system-modal Touch Bar):** ✅ ok ·
-  the renderer attached at **685.0 × 30.0 pt @ 2.00×** (= 1370 × 60 physical
-  px), remained attached after switching to Firefox, and cleaned up normally.
+  an end-to-end 1085-point renderer request attached with **1004.0 × 30.0 pt
+  visibly unclipped @ 2.00×** (= 2008 × 60 physical px), remained attached
+  after switching applications, and cleaned up normally. The physical panel is
+  1085 × 30 points (2170 × 60 pixels); macOS 26 reserves the remaining 81
+  points for its system-modal affordance, which this private modal path cannot
+  reclaim reliably.
   The former green-square result was **insufficient**: it proved only that a
   small Control Strip tray item could be registered, not that a full-width
   renderer was presented. The revised probe registers a retained 🐾 tray anchor,
   presents a separate recognizable bar through the placement-aware system-modal
-  selector (`placement: 1` for full width). Its custom view carries an explicit
-  685 × 30 constraint (an unconstrained view settles at only 445 points on this
-  macOS build), and the probe reports stable attachment geometry and post-Cmd-Tab
+  selector (`placement: 1` for full width). Its custom view requests the physical
+  1085 × 30 size (an unconstrained view settles at only 445 points on this macOS
+  build), and the probe reports stable, visibly unclipped geometry and post-Cmd-Tab
   persistence as separate results.
 - **03 · Brightness read/write (DisplayServices):** ✅ ok · Read `0.4814`,
   wrote `0.5014` (return `0` = success), restored `0.4814` (return `0`). Uses
@@ -104,7 +109,7 @@ Current build (`v0.1.0-dev`), verified on this Mac on 2026-09-18:
   known; **battery is not a scheduler input** (enforced by types + test).
 - ✅ Spotify AppleScript adapter, MediaRemote adapter for the browser.
 - ✅ Persistent Touch Bar presenter with a small retained tray anchor and a
-  separate full-width system-modal bar. Installation becomes `visible` only
+  separate maximum-width system-modal bar. Installation becomes `visible` only
   after the renderer reaches a non-zero Touch Bar window; selector failure or
   attachment timeout automatically selects the app-frontmost fallback.
 - ✅ Public fallback activates the accessory app and uses a key-capable hidden
@@ -235,7 +240,7 @@ diagnostic points to the enlarged preview and Probe 02 if neither path attaches.
 | Symbol | Framework | Purpose | Failure behavior |
 | --- | --- | --- | --- |
 | `DFRElementSetControlStripPresenceForIdentifier` | DFRFoundation | Control Strip anchor presence | Falls back to app-frontmost presenter automatically |
-| `addSystemTrayItem:`, `removeSystemTrayItem:`, `presentSystemModalTouchBar:placement:systemTrayItemIdentifier:`, `dismissSystemModalTouchBar:` | AppKit runtime selectors | Retained tray anchor and placement-1 full-width system-modal bar | Falls back if any selector is absent; attachment timeout is also treated as failure |
+| `addSystemTrayItem:`, `removeSystemTrayItem:`, `presentSystemModalTouchBar:placement:systemTrayItemIdentifier:`, `dismissSystemModalTouchBar:` | AppKit runtime selectors | Retained tray anchor and placement-1 maximum-width system-modal bar | Falls back if any selector is absent; attachment timeout is also treated as failure |
 | `DisplayServicesGetBrightness` / `DisplayServicesSetBrightness` | DisplayServices | Built-in display brightness on Apple Silicon | Brightness slot renders `.unavailable` (hatched sun) |
 | `MRMediaRemoteGetNowPlayingInfo`, `MRMediaRemoteSendCommand`, `MRMediaRemoteRegister…` | MediaRemote | Browser (Firefox/YouTube) playback tracking | Browser source reports `.unknown`; pet stays in free-roam |
 
