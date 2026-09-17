@@ -1,0 +1,42 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Xcode
+build/
+DerivedData/
+*.xcuserstate
+*.xcuserdatad/
+xcuserdata/
+*.xcworkspace/xcuserdata/
+*.xcodeproj/xcuserdata/
+*.xcodeproj/project.xcworkspace/xcuserdata/
+
+# Swift Package Manager
+.build/
+Package.resolved
+.swiftpm/
+
+# Probe intermediates
+Probes/**/build/
+Probes/**/DerivedData/
+
+# Distribution
+dist/
+*.dmg
+*.zip
+
+# Signing / secrets
+*.p12
+*.provisionprofile
+Config/*.local.xcconfig
+.env
+.env.*
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
