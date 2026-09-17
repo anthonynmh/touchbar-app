@@ -36,23 +36,30 @@ func probeSpotify() {
         return "not_running"
     end if
     tell application "Spotify"
-        set st to (player state as string)
+        set stateValue to player state
+        if stateValue is playing then
+            set stateText to "playing"
+        else if stateValue is paused then
+            set stateText to "paused"
+        else
+            set stateText to "stopped"
+        end if
         try
-            set pos to player position
+            set posValue to player position
         on error
-            set pos to -1
+            set posValue to -1
         end try
         try
-            set dur to (duration of current track) / 1000
+            set durValue to (duration of current track) / 1000
         on error
-            set dur to -1
+            set durValue to -1
         end try
         try
-            set nm to (name of current track)
+            set nameValue to (name of current track)
         on error
-            set nm to ""
+            set nameValue to ""
         end try
-        return st & "|" & pos & "|" & dur & "|" & nm
+        return stateText & "|" & posValue & "|" & durValue & "|" & nameValue
     end tell
     """
 

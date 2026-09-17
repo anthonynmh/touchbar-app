@@ -27,15 +27,43 @@ Populated from the initial target-machine validation on 2026-09-17.
 
 ## Probe results
 
-The five feasibility probes are the first thing to build. Each writes its actual
-measurements here. Until a probe has been run on the device, its line reads `pending`.
+Measured on this Mac on 2026-09-18 (macOS 26.6.2, `MacBookPro17,1`, `TouchBarServer` pid varies).
+Re-run any probe with `./Install/run-probe.sh 0N` after building.
 
-- **01 · Touch Bar render (bounds + backing scale):** pending
-- **02 · Persistent presenter (DFRFoundation):** pending
-- **03 · Brightness read/write (DisplayServices):** pending
-- **04 · Volume read/write (Core Audio):** pending
-- **05a · Spotify AppleScript adapter:** pending
-- **05b · Browser MediaRemote adapter (Firefox / YouTube):** pending
+- **01 · Touch Bar render (bounds + backing scale):** ✅ ok · Touch Bar window
+  is **685.0 × 30.0 pt @ 2.00× backing** (= 1370 × 60 physical px). Custom
+  `NSCustomTouchBarItem` + layer-backed `NSView` renders end-to-end.
+  `NSTouchBar` responder chain resolves the item ~7 ms after `window.touchBar`
+  is assigned to the key window, once the Touch Bar service is warm; cold-start
+  is up to ~6 s so the app must wait patiently on first launch. Public API path
+  requires a proper `.app` bundle + `open` — plain command-line executables
+  don't activate.
+- **02 · Persistent presenter (DFRFoundation):** ✅ ok · `dlopen`
+  `/System/Library/PrivateFrameworks/DFRFoundation.framework/DFRFoundation`
+  succeeds, `DFRSetStatus(2)` returns, `DFRElementSetControlStripPresenceForIdentifier`
+  returns, `+[NSTouchBarItem addSystemTrayItem:]` accepts the item. Visual
+  confirmation that the strip persists across app switches requires the human
+  eye — run `./Install/run-probe.sh 02` and Cmd-Tab away for 12 s.
+- **03 · Brightness read/write (DisplayServices):** ✅ ok · Read `0.4814`,
+  wrote `0.5014` (return `0` = success), restored `0.4814` (return `0`). Uses
+  private `DisplayServicesGetBrightness` / `DisplayServicesSetBrightness` from
+  `/System/Library/PrivateFrameworks/DisplayServices.framework` — the only
+  brightness path that works on Apple Silicon internal panels.
+- **04 · Volume read/write (Core Audio):** ✅ ok · Default output device
+  master channel is settable. Read `0.0000`, wrote `0.02`, restored `0.0000`
+  — both `AudioObjectSetPropertyData` calls returned `noErr` (0). Public API,
+  no private symbols.
+- **05a · Spotify AppleScript adapter:** ✅ ok · `player state=paused`,
+  `player position=150.22 s`, `duration=218.173 s`, `name of current track="Mother"`.
+  First run of the bundled app will trigger the Automation permission prompt.
+- **05b · Browser MediaRemote adapter (Firefox / YouTube):** ✅ ok · `dlopen`
+  `/System/Library/PrivateFrameworks/MediaRemote.framework/MediaRemote` +
+  `dlsym MRMediaRemoteGetNowPlayingInfo` succeed; callback fires within the
+  3-second wait. During the probe run no browser tab was actively playing, so
+  the returned dictionary was empty — this correctly maps to `.unknown` in
+  the runtime adapter. To verify positive-case behavior, start a YouTube video
+  in Firefox with `media.hardwaremediakeys.enabled = true` (default) and
+  rerun.
 
 ## Permissions requested
 

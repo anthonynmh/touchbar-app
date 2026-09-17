@@ -14,19 +14,26 @@ import AppKit
 let itemIdentifier = NSTouchBarItem.Identifier("com.local.snappy-nest.probe01.strip")
 
 final class ProbeView: NSView {
+    static var didReportGlobal = false
     private var didReport = false
+    private var pollTimer: Timer?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
         layer?.backgroundColor = NSColor.systemRed.cgColor
         layer?.magnificationFilter = .nearest
+        NSLog("TOUCHBAR_BOUNDS init frame=%@", NSStringFromRect(frameRect))
+        pollTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
+            self?.reportBoundsIfReady()
+        }
     }
 
     required init?(coder: NSCoder) { fatalError("unused") }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        NSLog("TOUCHBAR_BOUNDS viewDidMoveToWindow window=%@", window == nil ? "nil" : "present")
         reportBoundsIfReady()
     }
 
@@ -50,8 +57,17 @@ final class ProbeView: NSView {
         let b = bounds
         guard b.width > 0, b.height > 0 else { return }
         let scale = window.backingScaleFactor
-        NSLog("TOUCHBAR_BOUNDS ok width=%.2f height=%.2f backingScale=%.2f", b.width, b.height, scale)
+        let winFrame = window.frame
+        let superBounds = superview?.bounds ?? .zero
+        NSLog("TOUCHBAR_BOUNDS ok viewW=%.1f viewH=%.1f superW=%.1f superH=%.1f windowW=%.1f windowH=%.1f backingScale=%.2f",
+              b.width, b.height,
+              superBounds.width, superBounds.height,
+              winFrame.width, winFrame.height,
+              scale)
         didReport = true
+        ProbeView.didReportGlobal = true
+        pollTimer?.invalidate()
+        pollTimer = nil
         DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
             NSLog("TOUCHBAR_BOUNDS exit")
             NSApp.terminate(nil)
@@ -63,6 +79,8 @@ final class Delegate: NSObject, NSApplicationDelegate, NSTouchBarDelegate, NSWin
     var window: NSWindow!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        NSLog("TOUCHBAR_BOUNDS didFinishLaunching activationPolicy=%d isActive=%d",
+              NSApp.activationPolicy().rawValue, NSApp.isActive ? 1 : 0)
         let styleMask: NSWindow.StyleMask = [.titled, .closable]
         window = NSWindow(contentRect: NSRect(x: 200, y: 200, width: 320, height: 120),
                           styleMask: styleMask,
@@ -76,22 +94,37 @@ final class Delegate: NSObject, NSApplicationDelegate, NSTouchBarDelegate, NSWin
         bar.delegate = self
         bar.customizationIdentifier = NSTouchBar.CustomizationIdentifier("com.local.snappy-nest.probe01")
         bar.defaultItemIdentifiers = [itemIdentifier]
-        window.touchBar = bar
 
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
 
-        // Fallback: if we never got a bounds report (no Touch Bar on this device),
-        // exit after 6 seconds with a NO_TOUCHBAR line so the caller can record it.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 6.0) {
-            NSLog("TOUCHBAR_BOUNDS fail no_report_within_6s")
-            NSApp.terminate(nil)
+        // Set AFTER makeKeyAndOrderFront so the responder chain is established.
+        window.touchBar = bar
+        NSApp.touchBar = bar
+        NSLog("TOUCHBAR_BOUNDS installed touchBar on window+NSApp key=%d",
+              window.isKeyWindow ? 1 : 0)
+
+        // Poll the current touch bar visibility after a small delay.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            NSLog("TOUCHBAR_BOUNDS after0.5s isVisible=%d",
+                  NSTouchBar.isAutomaticCustomizeTouchBarMenuItemEnabled ? 1 : 0)
+        }
+
+        // Fallback: if we never got a bounds report (no Touch Bar on this
+        // device), exit after 12 seconds with a NO_TOUCHBAR line so the caller
+        // can record it. Touch Bar server cold-starts in ~6 s on macOS 26.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 12.0) {
+            if !ProbeView.didReportGlobal {
+                NSLog("TOUCHBAR_BOUNDS fail no_report_within_12s")
+                NSApp.terminate(nil)
+            }
         }
     }
 
     func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool { true }
 
     func touchBar(_ touchBar: NSTouchBar, makeItemForIdentifier identifier: NSTouchBarItem.Identifier) -> NSTouchBarItem? {
+        NSLog("TOUCHBAR_BOUNDS makeItemForIdentifier %@", identifier.rawValue)
         guard identifier == itemIdentifier else { return nil }
         let item = NSCustomTouchBarItem(identifier: identifier)
         item.view = ProbeView(frame: NSRect(x: 0, y: 0, width: 400, height: 30))
