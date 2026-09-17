@@ -1,100 +1,299 @@
-// Probe 02 — persistent presenter via DFRFoundation (private).
+// Probe 02 — full-width persistent system-modal Touch Bar presentation.
 //
-// Attempts to install a Control-Strip-level item that stays visible when
-// other apps become frontmost. Uses `dlopen` + `dlsym` on
-// /System/Library/PrivateFrameworks/DFRFoundation.framework so no linker
-// dependency on private symbols exists.
-//
-// Success line:
-//   PRESENTER ok dfrSetStatus=<int> controlStripPresence=<int>
-// Failure line:
-//   PRESENTER fail reason=<...>
-//
-// The probe waits 12 seconds so the user can Cmd-Tab to another app and
-// visually confirm the custom strip is still present, then cleans up.
+// This probe deliberately tests two separate claims:
+//   1. The renderer actually attaches to a non-zero Touch Bar window and
+//      reports its measured bounds/backing scale.
+//   2. After the user switches applications, that attached renderer remains
+//      present. Merely registering a Control Strip tray item is not success.
 
 import AppKit
 import Darwin
 
-typealias DFRSetStatus_t                              = @convention(c) (Int32) -> Void
-typealias DFRElementSetControlStripPresence_t         = @convention(c) (CFString, Bool) -> Void
-typealias DFRSystemModalShowsCloseBoxWhenFrontMost_t  = @convention(c) (Bool) -> Void
+typealias DFRSetStatus = @convention(c) (Int32) -> Void
+typealias DFRPresence = @convention(c) (CFString, Bool) -> Void
 
-func loadDFR() -> UnsafeMutableRawPointer? {
-    let path = "/System/Library/PrivateFrameworks/DFRFoundation.framework/DFRFoundation"
-    return dlopen(path, RTLD_LAZY | RTLD_LOCAL)
+private let trayIdentifier = "com.local.snappy-nest.probe02.tray"
+private let rendererIdentifier = NSTouchBarItem.Identifier("com.local.snappy-nest.probe02.renderer")
+
+private func loadDFR() -> UnsafeMutableRawPointer? {
+    dlopen(
+        "/System/Library/PrivateFrameworks/DFRFoundation.framework/DFRFoundation",
+        RTLD_LAZY | RTLD_LOCAL
+    )
 }
 
-func sym<T>(_ handle: UnsafeMutableRawPointer, _ name: String, as type: T.Type) -> T? {
-    guard let s = dlsym(handle, name) else { return nil }
-    return unsafeBitCast(s, to: T.self)
+private func symbol<T>(
+    _ handle: UnsafeMutableRawPointer,
+    _ name: String,
+    as type: T.Type
+) -> T? {
+    guard let address = dlsym(handle, name) else { return nil }
+    return unsafeBitCast(address, to: T.self)
 }
 
-let stripIdentifier = "com.local.snappy-nest.probe02.strip" as CFString
-let itemIdentifier  = NSTouchBarItem.Identifier(rawValue: "com.local.snappy-nest.probe02.strip")
+final class ModalProbeView: NSView {
+    var didAttach: ((NSRect, CGFloat) -> Void)?
+    private var hasReportedAttachment = false
+    private var pollTimer: Timer?
 
-final class StripView: NSView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
-        layer?.backgroundColor = NSColor.systemGreen.cgColor
+        layer?.magnificationFilter = .nearest
+        pollTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+            self?.reportAttachmentIfReady()
+        }
     }
+
     required init?(coder: NSCoder) { fatalError("unused") }
+
+    override var isFlipped: Bool { true }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        reportAttachmentIfReady()
+    }
+
+    override func layout() {
+        super.layout()
+        reportAttachmentIfReady()
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        let panelWidth = bounds.width / 6
+        let colors: [NSColor] = [
+            .systemIndigo, .systemPurple, .systemPink,
+            .systemOrange, .systemYellow, .systemTeal
+        ]
+        for (index, color) in colors.enumerated() {
+            color.setFill()
+            NSRect(
+                x: CGFloat(index) * panelWidth,
+                y: 0,
+                width: panelWidth + 1,
+                height: bounds.height
+            ).fill()
+        }
+
+        let message = "🐾  SNAPPY NEST · FULL-WIDTH MODAL PROBE · CMD-TAB NOW  🐾"
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.boldSystemFont(ofSize: 13),
+            .foregroundColor: NSColor.white,
+            .strokeColor: NSColor.black,
+            .strokeWidth: -2
+        ]
+        let size = message.size(withAttributes: attributes)
+        message.draw(
+            at: NSPoint(
+                x: max(4, (bounds.width - size.width) / 2),
+                y: max(1, (bounds.height - size.height) / 2)
+            ),
+            withAttributes: attributes
+        )
+    }
+
+    private func reportAttachmentIfReady() {
+        guard !hasReportedAttachment,
+              let window,
+              bounds.width > 0, bounds.height > 0,
+              window.frame.width > 0, window.frame.height > 0 else { return }
+        hasReportedAttachment = true
+        pollTimer?.invalidate()
+        pollTimer = nil
+        didAttach?(bounds, window.backingScaleFactor)
+    }
 }
 
-final class Delegate: NSObject, NSApplicationDelegate, NSTouchBarDelegate {
+final class ProbeDelegate: NSObject, NSApplicationDelegate, NSTouchBarDelegate {
     private var handle: UnsafeMutableRawPointer?
-    private var dfrSet: DFRSetStatus_t?
-    private var dfrPresence: DFRElementSetControlStripPresence_t?
+    private var dfrSetStatus: DFRSetStatus?
+    private var dfrPresence: DFRPresence?
+
+    private var trayItem: NSCustomTouchBarItem?
+    private var rendererItem: NSCustomTouchBarItem?
+    private var modalTouchBar: NSTouchBar?
+    private var rendererView: ModalProbeView?
+
+    private var modalPresented = false
+    private var trayRegistered = false
+    private var presenceEnabled = false
+    private var statusForced = false
+    private var rendererAttached = false
+    private var appSwitchDetected = false
+    private var cleanedUp = false
+    private var workspaceObserver: NSObjectProtocol?
+
+    private let addSelector = NSSelectorFromString("addSystemTrayItem:")
+    private let removeSelector = NSSelectorFromString("removeSystemTrayItem:")
+    private let presentSelector = NSSelectorFromString("presentSystemModalTouchBar:systemTrayItemIdentifier:")
+    private let dismissSelector = NSSelectorFromString("dismissSystemModalTouchBar:")
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        guard let h = loadDFR() else {
-            NSLog("PRESENTER fail reason=dlopen_dfrfoundation")
-            NSApp.terminate(nil); return
-        }
-        handle = h
-        dfrSet      = sym(h, "DFRSetStatus", as: DFRSetStatus_t.self)
-        dfrPresence = sym(h, "DFRElementSetControlStripPresenceForIdentifier",
-                          as: DFRElementSetControlStripPresence_t.self)
-
-        guard let dfrSet = dfrSet, let dfrPresence = dfrPresence else {
-            NSLog("PRESENTER fail reason=dlsym missing setStatus=\(dfrSet != nil) presence=\(dfrPresence != nil)")
-            NSApp.terminate(nil); return
+        guard prepareRuntime() else {
+            NSApp.terminate(nil)
+            return
         }
 
-        // Register a system-modal touch-bar item, then mark it as Control-Strip resident.
-        let item = NSCustomTouchBarItem(identifier: itemIdentifier)
-        item.view = StripView(frame: NSRect(x: 0, y: 0, width: 60, height: 30))
+        let tray = NSCustomTouchBarItem(identifier: NSTouchBarItem.Identifier(trayIdentifier))
+        let anchor = NSButton(title: "🐾", target: nil, action: nil)
+        anchor.isBordered = false
+        anchor.frame = NSRect(x: 0, y: 0, width: 28, height: 30)
+        tray.view = anchor
 
-        // `+[NSTouchBarItem addSystemTrayItem:]` is not exposed in the public
-        // AppKit headers, so call it via the Obj-C runtime.
-        let selector = NSSelectorFromString("addSystemTrayItem:")
-        let cls: AnyClass = NSTouchBarItem.self
-        if (cls as AnyObject).responds(to: selector) {
-            _ = (cls as AnyObject).perform(selector, with: item)
-        } else {
-            NSLog("PRESENTER fail reason=no_addSystemTrayItem_selector")
-            NSApp.terminate(nil); return
+        let view = ModalProbeView(frame: NSRect(x: 0, y: 0, width: 685, height: 30))
+        view.didAttach = { [weak self] bounds, scale in
+            guard let self else { return }
+            self.rendererAttached = true
+            NSLog(
+                "PRESENTER attachment=ok width=%.1f height=%.1f backingScale=%.2f pixels=%.0fx%.0f",
+                bounds.width, bounds.height, scale,
+                bounds.width * scale, bounds.height * scale
+            )
         }
-        dfrPresence(stripIdentifier, true)
-        dfrSet(2) // 2 = force show custom presentation
+        let item = NSCustomTouchBarItem(identifier: rendererIdentifier)
+        item.view = view
+        item.customizationLabel = "Snappy Nest Modal Probe"
 
-        NSLog("PRESENTER ok dfrSetStatus=2 controlStripPresence=1")
-        NSLog("PRESENTER note switch to another app (Cmd-Tab) and verify the green square stays visible.")
+        let bar = NSTouchBar()
+        bar.delegate = self
+        bar.customizationIdentifier = NSTouchBar.CustomizationIdentifier("com.local.snappy-nest.probe02.modal")
+        bar.defaultItemIdentifiers = [rendererIdentifier]
+        bar.principalItemIdentifier = rendererIdentifier
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 12.0) {
-            self.cleanup()
+        trayItem = tray
+        rendererItem = item
+        modalTouchBar = bar
+        rendererView = view
+
+        let itemClass: AnyClass = NSTouchBarItem.self
+        _ = (itemClass as AnyObject).perform(addSelector, with: tray)
+        trayRegistered = true
+        dfrPresence?(trayIdentifier as CFString, true)
+        presenceEnabled = true
+
+        let barClass: AnyClass = NSTouchBar.self
+        _ = (barClass as AnyObject).perform(
+            presentSelector,
+            with: bar,
+            with: trayIdentifier as NSString
+        )
+        modalPresented = true
+        dfrSetStatus?(2)
+        statusForced = true
+
+        NSLog("PRESENTER modal_requested tray_registered=1 status=2")
+        NSLog("PRESENTER instruction=Cmd-Tab_to_another_app_to_test_persistence")
+        observeApplicationSwitches()
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 12) { [weak self] in
+            guard let self, !self.rendererAttached else { return }
+            NSLog("PRESENTER attachment=fail reason=no_nonzero_touchbar_window_within_12s")
+            self.cleanupAndExit()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 18) { [weak self] in
+            guard let self else { return }
+            if !self.appSwitchDetected {
+                NSLog("PRESENTER persistence=untested reason=no_external_app_switch_detected")
+            }
+            self.cleanupAndExit()
         }
     }
 
-    private func cleanup() {
-        if let dfrPresence = dfrPresence {
-            dfrPresence(stripIdentifier, false)
+    func touchBar(
+        _ touchBar: NSTouchBar,
+        makeItemForIdentifier identifier: NSTouchBarItem.Identifier
+    ) -> NSTouchBarItem? {
+        identifier == rendererIdentifier ? rendererItem : nil
+    }
+
+    private func prepareRuntime() -> Bool {
+        guard let handle = loadDFR() else {
+            NSLog("PRESENTER fail reason=dlopen_dfrfoundation")
+            return false
         }
-        if let dfrSet = dfrSet {
-            dfrSet(0)
+        self.handle = handle
+        dfrSetStatus = symbol(handle, "DFRSetStatus", as: DFRSetStatus.self)
+        dfrPresence = symbol(
+            handle,
+            "DFRElementSetControlStripPresenceForIdentifier",
+            as: DFRPresence.self
+        )
+        guard dfrSetStatus != nil, dfrPresence != nil else {
+            NSLog("PRESENTER fail reason=missing_dfr_symbols")
+            return false
         }
-        NSLog("PRESENTER exit cleaned_up")
+
+        let itemClass: AnyClass = NSTouchBarItem.self
+        let barClass: AnyClass = NSTouchBar.self
+        guard (itemClass as AnyObject).responds(to: addSelector),
+              (itemClass as AnyObject).responds(to: removeSelector),
+              (barClass as AnyObject).responds(to: presentSelector),
+              (barClass as AnyObject).responds(to: dismissSelector) else {
+            NSLog(
+                "PRESENTER fail reason=missing_selector add=%d remove=%d present=%d dismiss=%d",
+                (itemClass as AnyObject).responds(to: addSelector) ? 1 : 0,
+                (itemClass as AnyObject).responds(to: removeSelector) ? 1 : 0,
+                (barClass as AnyObject).responds(to: presentSelector) ? 1 : 0,
+                (barClass as AnyObject).responds(to: dismissSelector) ? 1 : 0
+            )
+            return false
+        }
+        return true
+    }
+
+    private func observeApplicationSwitches() {
+        workspaceObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self,
+                  let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey]
+                    as? NSRunningApplication,
+                  app.processIdentifier != ProcessInfo.processInfo.processIdentifier else { return }
+            self.appSwitchDetected = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.75) { [weak self] in
+                guard let self else { return }
+                let stillAttached = self.rendererView?.window != nil
+                    && (self.rendererView?.bounds.width ?? 0) > 0
+                    && (self.rendererView?.bounds.height ?? 0) > 0
+                NSLog(
+                    "PRESENTER persistence=%@ switchedTo=%@ rendererAttached=%d",
+                    stillAttached ? "ok" : "fail",
+                    app.localizedName ?? app.bundleIdentifier ?? "unknown",
+                    stillAttached ? 1 : 0
+                )
+            }
+        }
+    }
+
+    private func cleanupAndExit() {
+        guard !cleanedUp else { return }
+        cleanedUp = true
+        if let workspaceObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(workspaceObserver)
+        }
+
+        let barClass: AnyClass = NSTouchBar.self
+        if modalPresented, let modalTouchBar {
+            _ = (barClass as AnyObject).perform(dismissSelector, with: modalTouchBar)
+            modalPresented = false
+        }
+        if presenceEnabled {
+            dfrPresence?(trayIdentifier as CFString, false)
+            presenceEnabled = false
+        }
+        let itemClass: AnyClass = NSTouchBarItem.self
+        if trayRegistered, let trayItem {
+            _ = (itemClass as AnyObject).perform(removeSelector, with: trayItem)
+            trayRegistered = false
+        }
+        if statusForced {
+            dfrSetStatus?(0)
+            statusForced = false
+        }
+        NSLog("PRESENTER exit cleaned_up=1")
         NSApp.terminate(nil)
     }
 
@@ -103,6 +302,6 @@ final class Delegate: NSObject, NSApplicationDelegate, NSTouchBarDelegate {
 
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
-let delegate = Delegate()
+let delegate = ProbeDelegate()
 app.delegate = delegate
 app.run()

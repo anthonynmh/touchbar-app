@@ -23,7 +23,7 @@ NN="$1"
 
 case "$NN" in
     01) TARGET="Probe01TouchBar";   NEEDS_BUNDLE=1; WAIT_SECS=15 ;;
-    02) TARGET="Probe02Presenter";  NEEDS_BUNDLE=1; WAIT_SECS=14 ;;
+    02) TARGET="Probe02Presenter";  NEEDS_BUNDLE=1; WAIT_SECS=20 ;;
     03) TARGET="Probe03Brightness"; NEEDS_BUNDLE=0; WAIT_SECS=3  ;;
     04) TARGET="Probe04Volume";     NEEDS_BUNDLE=0; WAIT_SECS=3  ;;
     05) TARGET="Probe05Media";      NEEDS_BUNDLE=0; WAIT_SECS=8  ;;

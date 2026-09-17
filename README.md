@@ -56,12 +56,15 @@ Re-run any probe with `./Install/run-probe.sh 0N` after building.
   is up to ~6 s so the app must wait patiently on first launch. Public API path
   requires a proper `.app` bundle + `open` — plain command-line executables
   don't activate.
-- **02 · Persistent presenter (DFRFoundation):** ✅ ok · `dlopen`
-  `/System/Library/PrivateFrameworks/DFRFoundation.framework/DFRFoundation`
-  succeeds, `DFRSetStatus(2)` returns, `DFRElementSetControlStripPresenceForIdentifier`
-  returns, `+[NSTouchBarItem addSystemTrayItem:]` accepts the item. Visual
-  confirmation that the strip persists across app switches requires the human
-  eye — run `./Install/run-probe.sh 02` and Cmd-Tab away for 12 s.
+- **02 · Persistent presenter (DFRFoundation + system-modal Touch Bar):** ✅ ok ·
+  the renderer attached at **685.0 × 30.0 pt @ 2.00×** (= 1370 × 60 physical
+  px), remained attached after switching to Firefox, and cleaned up normally.
+  The former green-square result was **insufficient**: it proved only that a
+  small Control Strip tray item could be registered, not that a full-width
+  renderer was presented. The revised probe registers a retained 🐾 tray anchor,
+  presents a separate recognizable bar through
+  `presentSystemModalTouchBar:systemTrayItemIdentifier:`, and reports attachment
+  geometry and post-Cmd-Tab persistence as separate results.
 - **03 · Brightness read/write (DisplayServices):** ✅ ok · Read `0.4814`,
   wrote `0.5014` (return `0` = success), restored `0.4814` (return `0`). Uses
   private `DisplayServicesGetBrightness` / `DisplayServicesSetBrightness` from
@@ -98,12 +101,16 @@ Current build (`v0.1.0-dev`), verified on this Mac on 2026-09-18:
   free-roam scheduler; progress-follow mode when duration+position are
   known; **battery is not a scheduler input** (enforced by types + test).
 - ✅ Spotify AppleScript adapter, MediaRemote adapter for the browser.
-- ✅ Persistent Touch Bar presenter (DFRFoundation) with automatic
-  fallback to app-frontmost presentation.
+- ✅ Persistent Touch Bar presenter with a small retained tray anchor and a
+  separate full-width system-modal bar. Installation becomes `visible` only
+  after the renderer reaches a non-zero Touch Bar window; selector failure or
+  attachment timeout automatically selects the app-frontmost fallback.
+- ✅ Public fallback activates the accessory app and uses a key-capable hidden
+  window to establish the responder chain.
 - ✅ Menu bar 🐾, escape hatch (`Opt+Cmd+\` or menu), enlarged 6× preview.
-- ✅ 41 XCTest cases: layout math, midnight-seam mirror, seek/pause/live
-  interpolation, seeded scheduler determinism, no-consecutive-repeat,
-  and byte-identical action logs under swept battery states.
+- ✅ 46 XCTest cases: 41 model tests plus 5 presenter lifecycle tests covering
+  modal call order, hide/show, idempotent cleanup, unavailable selectors, and
+  attachment-timeout fallback.
 - ✅ `install.sh` / `uninstall.sh` / `Makefile` including `dmg` +
   `notarize` opt-in targets.
 
@@ -133,7 +140,8 @@ touchbar-pet/
     Probe04Volume/             # Core Audio roundtrip
     Probe05Media/              # Spotify + MediaRemote adapters
   Tests/
-    SnappyNestCoreTests/       # 41 XCTest cases
+    SnappyNestCoreTests/       # 41 model XCTest cases
+    SnappyNestUITests/         # presenter lifecycle XCTest cases
   Install/
     install.sh   uninstall.sh   wrap-as-app.sh   run-probe.sh
   Makefile
@@ -151,22 +159,15 @@ touchbar-pet/
 
 ## Build steps
 
-Xcode is the primary build path.
+This repository is a Swift Package; it does not contain an `.xcodeproj`.
 
 ```sh
-open TouchbarPet.xcodeproj      # then ⌘R the TouchbarPet scheme
+swift build --product TouchbarPet
+swift test
 ```
 
-Command line:
-
-```sh
-xcodebuild \
-  -project TouchbarPet.xcodeproj \
-  -scheme TouchbarPet \
-  -configuration Release \
-  -destination 'platform=macOS' \
-  build
-```
+You can also open `Package.swift` in Xcode and use the SwiftPM-generated
+schemes, but the documented build and installation paths use `swift build`.
 
 ## Installation
 
@@ -176,10 +177,10 @@ Local, offline, unsigned build for your own machine:
 ./Install/install.sh
 ```
 
-The script verifies macOS ≥ 26 + arm64, runs `xcodebuild`, copies the resulting
-`.app` to `/Applications/TouchbarPet.app`, and prints the escape-hatch shortcut. It
-refuses to run as root and never touches `/System` or `/Library`. Launch-at-login
-is opt-in from Preferences after first launch — the installer never enables it silently.
+The script verifies macOS ≥ 26 + arm64, runs `swift build -c release`, wraps the
+executable in a minimal `.app`, and copies it to `/Applications/TouchbarPet.app`.
+It refuses to run as root, never touches `/System` or `/Library`, does not launch
+the app after copying, and does not enable launch-at-login.
 
 To uninstall:
 
@@ -224,12 +225,15 @@ Three ways to reclaim the default macOS Touch Bar:
 
 ## Private-API risk register
 
-Every private symbol is `dlopen`-loaded through a bridge file. Failure is user-visible
-but never fatal: the feature degrades to a documented unavailable state.
+Private framework symbols are resolved at runtime and private AppKit selectors
+are checked before use. Failure is user-visible but never fatal: persistent
+presentation degrades to the public app-frontmost path, and a first-launch
+diagnostic points to the enlarged preview and Probe 02 if neither path attaches.
 
 | Symbol | Framework | Purpose | Failure behavior |
 | --- | --- | --- | --- |
-| `DFRSetStatus`, `DFRElementSetControlStripPresenceForIdentifier` | DFRFoundation | Persistent presenter across app switches | Falls back to app-frontmost presenter automatically |
+| `DFRSetStatus`, `DFRElementSetControlStripPresenceForIdentifier` | DFRFoundation | Control Strip presence and presentation mode | Falls back to app-frontmost presenter automatically |
+| `addSystemTrayItem:`, `removeSystemTrayItem:`, `presentSystemModalTouchBar:systemTrayItemIdentifier:`, `dismissSystemModalTouchBar:` | AppKit runtime selectors | Retained tray anchor and full-width system-modal bar | Falls back if any selector is absent; attachment timeout is also treated as failure |
 | `DisplayServicesGetBrightness` / `DisplayServicesSetBrightness` | DisplayServices | Built-in display brightness on Apple Silicon | Brightness slot renders `.unavailable` (hatched sun) |
 | `MRMediaRemoteGetNowPlayingInfo`, `MRMediaRemoteSendCommand`, `MRMediaRemoteRegister…` | MediaRemote | Browser (Firefox/YouTube) playback tracking | Browser source reports `.unknown`; pet stays in free-roam |
 
@@ -250,7 +254,7 @@ simulation panel for clock / battery / playback. All state will persist to
 
 ## Testing
 
-- `swift test` runs the 41-test XCTest suite; wall-clock ~20 ms.
+- `swift test` runs 41 model tests and 5 presenter lifecycle tests.
 - `./Install/run-probe.sh 0N` (N = 1…5) rebuilds and runs a specific probe.
 - Battery-independence acceptance test in `PetControllerBatteryIndependenceTests`:
   600 ticks × 3 battery states (dying / full / charging) produce a
@@ -275,8 +279,12 @@ simulation panel for clock / battery / playback. All state will persist to
   key events is out of scope).
 - **Volume slider is greyed.** The current output device is fixed-volume (HDMI/S-PDIF
   passthrough). Snappy Nest re-binds automatically when you switch to a settable device.
-- **Persistent presentation toggle is disabled.** Startup probe couldn't verify that
-  the strip stayed visible under another app. Fall back to app-frontmost mode.
+- **Menu bar says “App-frontmost.”** The private persistent path was unavailable
+  or failed to attach, so Snappy Nest activated its public fallback. That bar is
+  expected only while Snappy Nest is frontmost.
+- **Menu bar says “Not visible.”** Neither presenter attached. Open **Enlarged
+  Preview…** from the 🐾 menu, then run `./Install/run-probe.sh 02` and inspect
+  the `attachment=` and `persistence=` lines.
 
 ## Non-goals
 
