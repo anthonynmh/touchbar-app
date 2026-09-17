@@ -156,8 +156,9 @@ public final class RealVolumeProvider: VolumeProvider {
         guard case .supported = capability else { return }
         let clamped = min(1.0, max(0.0, newValue))
         if usesSystemVolumeScript {
-            _ = runSystemVolumeScript("set volume output volume \(Int((clamped * 100).rounded())) without output muted")
+            guard runSystemVolumeScript("set volume output volume \(Int((clamped * 100).rounded())) without output muted") != nil else { return }
             value = clamped
+            isMuted = false
             notify()
             return
         }
