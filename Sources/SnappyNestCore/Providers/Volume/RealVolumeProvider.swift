@@ -1,4 +1,5 @@
 import CoreAudio
+import AudioToolbox
 import Foundation
 
 /// Core Audio backed volume provider. Public-API only; no private symbols.
@@ -16,6 +17,8 @@ public final class RealVolumeProvider: VolumeProvider {
     private var handlers: [(Double, Bool) -> Void] = []
     private var currentDevice: AudioDeviceID = kAudioObjectUnknown
     private var currentChannel: UInt32 = kAudioObjectPropertyElementMain
+    private var usesVirtualMaster = false
+    private var usesSystemVolumeScript = false
     private var writeInFlightUntil: Date = .distantPast
 
     public init() {
@@ -47,12 +50,37 @@ public final class RealVolumeProvider: VolumeProvider {
             return
         }
         currentDevice = device
-        // Try master first.
+        usesSystemVolumeScript = false
+        // The virtual master is the system-level control and works for modern
+        // aggregate/Bluetooth outputs that do not expose scalar channels.
+        var virtualAddr = virtualMasterAddress()
+        if AudioHardwareServiceHasProperty(device, &virtualAddr) {
+            var isSettable: DarwinBoolean = false
+            _ = AudioHardwareServiceIsPropertySettable(device, &virtualAddr, &isSettable)
+            guard isSettable.boolValue else {
+                capability = .unavailable(reason: "fixed_volume_device")
+                readOnce()
+                notify(); return
+            }
+            usesVirtualMaster = true
+            usesSystemVolumeScript = false
+            currentChannel = kAudioObjectPropertyElementMain
+            capability = .supported
+            readOnce()
+            addVolumeListener()
+            return
+        }
+
+        // Fall back to a device's scalar master/channel controls.
+        usesVirtualMaster = false
         var addr = volumeAddress(element: kAudioObjectPropertyElementMain)
         if !AudioObjectHasProperty(device, &addr) {
             addr = volumeAddress(element: 1)
             if !AudioObjectHasProperty(device, &addr) {
-                capability = .unavailable(reason: "no_volume_property")
+                usesSystemVolumeScript = true
+                capability = readSystemVolume() == nil
+                    ? .unavailable(reason: "no_volume_property")
+                    : .supported
                 notify(); return
             }
             currentChannel = 1
@@ -72,7 +100,9 @@ public final class RealVolumeProvider: VolumeProvider {
     }
 
     private func addVolumeListener() {
-        var addr = volumeAddress(element: currentChannel)
+        var addr = usesVirtualMaster
+            ? virtualMasterAddress()
+            : volumeAddress(element: currentChannel)
         let self_ = Unmanaged.passUnretained(self).toOpaque()
         AudioObjectAddPropertyListener(
             currentDevice, &addr,
@@ -92,10 +122,21 @@ public final class RealVolumeProvider: VolumeProvider {
     }
 
     private func readOnce() {
-        var addr = volumeAddress(element: currentChannel)
+        if usesSystemVolumeScript {
+            _ = readSystemVolume()
+            return
+        }
         var v: Float32 = 0
         var size = UInt32(MemoryLayout<Float32>.size)
-        if AudioObjectGetPropertyData(currentDevice, &addr, 0, nil, &size, &v) == noErr {
+        let result: OSStatus
+        if usesVirtualMaster {
+            var addr = virtualMasterAddress()
+            result = AudioHardwareServiceGetPropertyData(currentDevice, &addr, 0, nil, &size, &v)
+        } else {
+            var addr = volumeAddress(element: currentChannel)
+            result = AudioObjectGetPropertyData(currentDevice, &addr, 0, nil, &size, &v)
+        }
+        if result == noErr {
             value = Double(v)
         }
     }
@@ -114,13 +155,27 @@ public final class RealVolumeProvider: VolumeProvider {
     public func set(_ newValue: Double) {
         guard case .supported = capability else { return }
         let clamped = min(1.0, max(0.0, newValue))
-        var addr = volumeAddress(element: currentChannel)
+        if usesSystemVolumeScript {
+            _ = runSystemVolumeScript("set volume output volume \(Int((clamped * 100).rounded())) without output muted")
+            value = clamped
+            notify()
+            return
+        }
         var target = Float32(clamped)
         writeInFlightUntil = Date().addingTimeInterval(0.1)
-        _ = AudioObjectSetPropertyData(
-            currentDevice, &addr, 0, nil,
-            UInt32(MemoryLayout<Float32>.size), &target
-        )
+        if usesVirtualMaster {
+            var addr = virtualMasterAddress()
+            _ = AudioHardwareServiceSetPropertyData(
+                currentDevice, &addr, 0, nil,
+                UInt32(MemoryLayout<Float32>.size), &target
+            )
+        } else {
+            var addr = volumeAddress(element: currentChannel)
+            _ = AudioObjectSetPropertyData(
+                currentDevice, &addr, 0, nil,
+                UInt32(MemoryLayout<Float32>.size), &target
+            )
+        }
         value = clamped
         notify()
     }
@@ -130,6 +185,34 @@ public final class RealVolumeProvider: VolumeProvider {
         // kAudioDevicePropertyMute. Left as a follow-up.
         isMuted = muted
         notify()
+    }
+
+    @discardableResult
+    private func readSystemVolume() -> Double? {
+        guard let output = runSystemVolumeScript("get volume settings") else { return nil }
+        let pattern = #"output volume:(\d+)"#
+        guard let match = output.range(of: pattern, options: .regularExpression),
+              let number = Int(output[match].split(separator: ":").last ?? "") else { return nil }
+        value = Double(number) / 100.0
+        isMuted = output.contains("output muted:true")
+        return value
+    }
+
+    private func runSystemVolumeScript(_ script: String) -> String? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        process.arguments = ["-e", script]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = Pipe()
+        do {
+            try process.run()
+            process.waitUntilExit()
+            guard process.terminationStatus == 0 else { return nil }
+            return String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)
+        } catch {
+            return nil
+        }
     }
 
     public func subscribe(_ handler: @escaping (Double, Bool) -> Void) {
@@ -158,6 +241,14 @@ public final class RealVolumeProvider: VolumeProvider {
             mSelector: kAudioDevicePropertyVolumeScalar,
             mScope: kAudioObjectPropertyScopeOutput,
             mElement: element
+        )
+    }
+
+    private func virtualMasterAddress() -> AudioObjectPropertyAddress {
+        AudioObjectPropertyAddress(
+            mSelector: kAudioHardwareServiceDeviceProperty_VirtualMainVolume,
+            mScope: kAudioDevicePropertyScopeOutput,
+            mElement: kAudioObjectPropertyElementMain
         )
     }
 }

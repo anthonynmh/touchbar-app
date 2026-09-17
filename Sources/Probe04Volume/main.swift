@@ -10,6 +10,7 @@
 //   VOLUME fail reason=<...>
 
 import CoreAudio
+import AudioToolbox
 import Foundation
 
 func getDefaultOutputDevice() -> AudioDeviceID? {
@@ -35,12 +36,19 @@ guard let device = getDefaultOutputDevice() else {
     exit(1)
 }
 
-// Try master channel first; fall back to left channel if not supported.
-let masterAddr = volumeAddress(channel: kAudioObjectPropertyElementMain)
-var addr = masterAddr
+// Prefer the system virtual master; fall back to device scalar channels.
+var addr = AudioObjectPropertyAddress(
+    mSelector: kAudioHardwareServiceDeviceProperty_VirtualMainVolume,
+    mScope: kAudioDevicePropertyScopeOutput,
+    mElement: kAudioObjectPropertyElementMain
+)
+let usesVirtualMaster = AudioHardwareServiceHasProperty(device, &addr)
+if !usesVirtualMaster {
+    addr = volumeAddress(channel: kAudioObjectPropertyElementMain)
+}
 
 var isSettable: DarwinBoolean = false
-var hasProperty = AudioObjectHasProperty(device, &addr)
+var hasProperty = usesVirtualMaster || AudioObjectHasProperty(device, &addr)
 if !hasProperty {
     // fall back to per-channel
     var leftAddr = volumeAddress(channel: 1)
@@ -56,7 +64,12 @@ _ = AudioObjectIsPropertySettable(device, &addr, &isSettable)
 
 var value: Float32 = 0
 var size = UInt32(MemoryLayout<Float32>.size)
-let getResult = AudioObjectGetPropertyData(device, &addr, 0, nil, &size, &value)
+let getResult: OSStatus
+if usesVirtualMaster {
+    getResult = AudioHardwareServiceGetPropertyData(device, &addr, 0, nil, &size, &value)
+} else {
+    getResult = AudioObjectGetPropertyData(device, &addr, 0, nil, &size, &value)
+}
 guard getResult == noErr else {
     print("VOLUME fail reason=get_property rc=\(getResult)")
     exit(1)
@@ -69,12 +82,22 @@ if !isSettable.boolValue {
 
 let target = min(1.0, value + 0.02)
 var targetVar = Float32(target)
-let setResult = AudioObjectSetPropertyData(device, &addr, 0, nil, size, &targetVar)
+let setResult: OSStatus
+if usesVirtualMaster {
+    setResult = AudioHardwareServiceSetPropertyData(device, &addr, 0, nil, size, &targetVar)
+} else {
+    setResult = AudioObjectSetPropertyData(device, &addr, 0, nil, size, &targetVar)
+}
 
 Thread.sleep(forTimeInterval: 0.4)
 
 var restoreVar = Float32(value)
-let setBackResult = AudioObjectSetPropertyData(device, &addr, 0, nil, size, &restoreVar)
+let setBackResult: OSStatus
+if usesVirtualMaster {
+    setBackResult = AudioHardwareServiceSetPropertyData(device, &addr, 0, nil, size, &restoreVar)
+} else {
+    setBackResult = AudioObjectSetPropertyData(device, &addr, 0, nil, size, &restoreVar)
+}
 
 print(String(format: "VOLUME ok read=%.4f settable=1 setResult=%d setBackResult=%d",
              value, setResult, setBackResult))
