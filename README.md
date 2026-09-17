@@ -10,6 +10,24 @@ Local-only. No cloud, no telemetry, no microphone, no network. Works fully offli
 The pet doubles as a playback progress indicator for Spotify and, when the browser
 publishes Now Playing info, for YouTube in Firefox.
 
+## Contents
+
+- [Compatibility snapshot](#compatibility-snapshot)
+- [Probe results](#probe-results)
+- [What's built](#whats-built)
+- [Repository layout](#repository-layout)
+- [Permissions requested](#permissions-requested)
+- [Build steps](#build-steps)
+- [Installation](#installation)
+- [Asset replacement](#asset-replacement)
+- [Escape hatch](#escape-hatch)
+- [Private-API risk register](#private-api-risk-register)
+- [Preferences](#preferences)
+- [Testing](#testing)
+- [Troubleshooting](#troubleshooting)
+- [Non-goals](#non-goals)
+- [License](#license)
+
 ## Compatibility snapshot
 
 Populated from the initial target-machine validation on 2026-09-17.
@@ -64,6 +82,63 @@ Re-run any probe with `./Install/run-probe.sh 0N` after building.
   the runtime adapter. To verify positive-case behavior, start a YouTube video
   in Firefox with `media.hardwaremediakeys.enabled = true` (default) and
   rerun.
+
+## What's built
+
+Current build (`v0.1.0-dev`), verified on this Mac on 2026-09-18:
+
+- ✅ 24-hour panorama with per-column color bands, sun/moon indicator with
+  midnight-seam duplicate rendering, hour ticks stronger at 00/06/12/18/24.
+- ✅ Layer-backed `SceneRenderer` at nearest-neighbor filtering,
+  measured-bounds pixel-alignment (2× on this Mac).
+- ✅ Segmented battery health bar with charging bolt, fed from IOPS.
+- ✅ Directly-draggable brightness (`DisplayServices`) and volume (Core Audio).
+- ✅ Contextual play/pause reserved slot; toggles the active media source.
+- ✅ Pet state machine (12 actions) with seeded, hour-of-day-weighted
+  free-roam scheduler; progress-follow mode when duration+position are
+  known; **battery is not a scheduler input** (enforced by types + test).
+- ✅ Spotify AppleScript adapter, MediaRemote adapter for the browser.
+- ✅ Persistent Touch Bar presenter (DFRFoundation) with automatic
+  fallback to app-frontmost presentation.
+- ✅ Menu bar 🐾, escape hatch (`Opt+Cmd+\` or menu), enlarged 6× preview.
+- ✅ 41 XCTest cases: layout math, midnight-seam mirror, seek/pause/live
+  interpolation, seeded scheduler determinism, no-consecutive-repeat,
+  and byte-identical action logs under swept battery states.
+- ✅ `install.sh` / `uninstall.sh` / `Makefile` including `dmg` +
+  `notarize` opt-in targets.
+
+Deferred / follow-up:
+
+- Full Preferences window with SMAppService launch-at-login, Reduce Motion
+  override, escape-hatch shortcut recorder, debug simulation panel.
+- Real sprite atlases (current release ships labeled placeholder art).
+- Additional media adapters beyond Spotify + browser.
+
+## Repository layout
+
+```
+touchbar-pet/
+  Package.swift                # SwiftPM: library + app + 5 probe executables
+  Sources/
+    SnappyNestCore/            # AppKit-free: scene, layout, pet SM, providers
+      Scene/     Layout/  Pet/  Support/
+      Providers/
+        Clock/  Battery/  Brightness/  Volume/  Media/
+    SnappyNestUI/              # AppKit: renderer, presenter, preview
+      Renderer/  Presenter/  Preview/
+    TouchbarPet/               # main app: AppDelegate + main.swift
+    Probe01TouchBar/           # Touch Bar bounds + backing scale
+    Probe02Presenter/          # DFRFoundation persistent-presenter probe
+    Probe03Brightness/         # DisplayServices roundtrip
+    Probe04Volume/             # Core Audio roundtrip
+    Probe05Media/              # Spotify + MediaRemote adapters
+  Tests/
+    SnappyNestCoreTests/       # 41 XCTest cases
+  Install/
+    install.sh   uninstall.sh   wrap-as-app.sh   run-probe.sh
+  Makefile
+  README.md   LICENSE
+```
 
 ## Permissions requested
 
@@ -160,17 +235,32 @@ but never fatal: the feature degrades to a documented unavailable state.
 
 ## Preferences
 
-Menu bar → Snappy Nest → Preferences.
+The current release exposes preferences from the 🐾 menu bar item — a
+full Preferences window is a follow-up.
 
-- Launch at login (`SMAppService.mainApp`).
-- Persistent presentation toggle, with a live capability badge.
-- Reduce Motion override.
-- Preferred media source: `Spotify` | `Browser` | `Auto` (most-recently-playing).
-- Escape-hatch shortcut recorder.
-- Debug simulation: fake clock, fake battery + charging, fake playback state, seed input.
-- Enlarged preview window (6× nearest-neighbor).
+- **Hide / Show Touch Bar Overlay** — the escape hatch (`Opt+Cmd+\`).
+- **Enlarged Preview…** — opens the 6× nearest-neighbor preview window.
+- **Media source** submenu — `Auto` (most-recently-playing), `Spotify`, `Browser`.
+- **Quit Snappy Nest** — full teardown; the default Control Strip returns.
 
-All settings are stored in `~/Library/Preferences/com.local.snappy-nest.plist`.
+Follow-ups tracked for the next release: launch-at-login via `SMAppService`,
+Reduce Motion override, escape-hatch shortcut recorder, and a debug
+simulation panel for clock / battery / playback. All state will persist to
+`~/Library/Preferences/com.local.snappy-nest.plist`; no cloud sync.
+
+## Testing
+
+- `swift test` runs the 41-test XCTest suite; wall-clock ~20 ms.
+- `./Install/run-probe.sh 0N` (N = 1…5) rebuilds and runs a specific probe.
+- Battery-independence acceptance test in `PetControllerBatteryIndependenceTests`:
+  600 ticks × 3 battery states (dying / full / charging) produce a
+  byte-identical `PetAction` log for a fixed seed + clock + media.
+- DST safety: `WorldTime` is computed from `Calendar.dateComponents(...)`
+  rather than seconds-since-epoch, so a repeated wall-clock hour (fall-back)
+  genuinely repeats its panorama position and a skipped hour (spring-forward)
+  is genuinely skipped.
+- Renderer smoke test: launch the app, open **Enlarged Preview…**, verify
+  the pet, celestial body, and controls render at 6×.
 
 ## Troubleshooting
 
