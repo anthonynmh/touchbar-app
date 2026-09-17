@@ -38,12 +38,19 @@ public enum CelestialSolver {
     /// Half-width of the sprite in points — used for seam-mirror detection.
     public static let bodyHalfWidth: CGFloat = 6
 
-    public static func position(for time: WorldTime, sceneSize: CGSize) -> CelestialPosition {
+    public static func position(
+        for time: WorldTime,
+        sceneSize: CGSize,
+        horizontalRange: ClosedRange<CGFloat>? = nil
+    ) -> CelestialPosition {
         let width = sceneSize.width
         let height = sceneSize.height
+        let range = horizontalRange ?? 0...width
+        let travelWidth = max(0, range.upperBound - range.lowerBound)
 
-        // Horizontal mapping matches the full-panorama sky: x = fraction * width.
-        let x = width * CGFloat(time.fraction)
+        // The composer can constrain the body to its unobstructed world region;
+        // standalone callers retain the full-panorama mapping by default.
+        let x = range.lowerBound + travelWidth * CGFloat(time.fraction)
 
         // Vertical arc computed independently of horizontal mapping.
         // In flipped coordinates (y=0 at top), the peak is at low y and horizon
@@ -66,10 +73,10 @@ public enum CelestialSolver {
         // copy at the other side so it doesn't visually vanish at midnight.
         var seamMirror: CGPoint?
         if body == .moon {
-            if x < bodyHalfWidth {
-                seamMirror = CGPoint(x: x + width, y: y)
-            } else if x > width - bodyHalfWidth {
-                seamMirror = CGPoint(x: x - width, y: y)
+            if x < range.lowerBound + bodyHalfWidth {
+                seamMirror = CGPoint(x: x + travelWidth, y: y)
+            } else if x > range.upperBound - bodyHalfWidth {
+                seamMirror = CGPoint(x: x - travelWidth, y: y)
             }
         }
 

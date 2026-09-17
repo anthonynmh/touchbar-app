@@ -23,7 +23,8 @@ final class SceneComposerTests: XCTestCase {
     }
 
     func testNoonComposesSunAtCenter() {
-        let composer = SceneComposer(layout: LayoutEngine(bounds: bounds, backingScale: 2.0))
+        let layout = LayoutEngine(bounds: bounds, backingScale: 2.0)
+        let composer = SceneComposer(layout: layout)
         let model = composer.compose(
             now: noonUTC(),
             calendar: fixedCalendar(),
@@ -34,8 +35,39 @@ final class SceneComposerTests: XCTestCase {
             media: .unknown
         )
         XCTAssertEqual(model.celestial.body, .sun)
-        XCTAssertEqual(model.celestial.point.x, bounds.width / 2, accuracy: 1e-6)
+        XCTAssertEqual(model.celestial.point.x, layout.regions.middle.midX, accuracy: 1e-6)
         XCTAssertNil(model.progressFraction)
+    }
+
+    func testMoonStaysClearOfBatteryAndControlsAtMidnightSeam() {
+        let layout = LayoutEngine(bounds: bounds, backingScale: 2.0)
+        let composer = SceneComposer(layout: layout)
+        var components = DateComponents()
+        components.year = 2026
+        components.month = 6
+        components.day = 21
+        components.hour = 0
+        let midnight = fixedCalendar().date(from: components)!
+
+        let model = composer.compose(
+            now: midnight,
+            calendar: fixedCalendar(),
+            pet: .placeholder,
+            battery: BatterySnapshot(isPresent: true, percentage: 0.8, isCharging: false),
+            brightness: (0.5, true),
+            volume: (0.4, false, true),
+            media: .unknown
+        )
+        let halfWidth = CelestialSolver.bodyHalfWidth
+
+        XCTAssertGreaterThanOrEqual(
+            model.celestial.point.x - halfWidth,
+            model.layout.battery.maxX - 1e-6
+        )
+        XCTAssertLessThanOrEqual(
+            (model.celestial.seamMirror?.x ?? .infinity) + halfWidth,
+            model.layout.right.minX + 1e-6
+        )
     }
 
     func testProgressTrailWhenPlaying() {

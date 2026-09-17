@@ -68,9 +68,14 @@ public struct SceneComposer {
         volume: (value: Double, muted: Bool, available: Bool),
         media: MediaSnapshot
     ) -> SceneModel {
-        let time = WorldTime(from: now, in: calendar)
-        let celestial = CelestialSolver.position(for: time, sceneSize: layout.bounds.size)
         let regions = layout.regions
+        let time = WorldTime(from: now, in: calendar)
+        let bodyInset = min(CelestialSolver.bodyHalfWidth, regions.middle.width / 2)
+        let celestial = CelestialSolver.position(
+            for: time,
+            sceneSize: layout.bounds.size,
+            horizontalRange: (regions.middle.minX + bodyInset)...(regions.middle.maxX - bodyInset)
+        )
         let props = SceneLayout.defaultObjects(inside: regions.middle)
         let progress = media.progressFraction(at: now)
 
