@@ -43,6 +43,7 @@ public final class SceneRenderer: NSView {
         super.init(frame: frameRect)
         wantsLayer = true
         buildLayerTree()
+        configureInput()
     }
 
     public required init?(coder: NSCoder) { fatalError() }
@@ -99,6 +100,25 @@ public final class SceneRenderer: NSView {
         volumeLayer.strokeColor = Palette.cyan.copy(alpha: 0.75)
         volumeLayer.lineWidth = 4.0
         volumeLayer.lineCap = .round
+    }
+
+    private func configureInput() {
+        // Custom Touch Bar views do not automatically behave like NSControl.
+        // Direct-touch gesture recognizers keep taps and scrubbing functional
+        // while the persistent bar's accessory app is not frontmost.
+        let click = NSClickGestureRecognizer(target: self, action: #selector(handleClick(_:)))
+        click.numberOfTouchesRequired = 1
+        click.allowedTouchTypes = .direct
+        addGestureRecognizer(click)
+
+        let pan = NSPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
+        pan.numberOfTouchesRequired = 1
+        pan.allowedTouchTypes = .direct
+        addGestureRecognizer(pan)
+    }
+
+    public override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
     }
 
     public func update(model: SceneModel) {
@@ -385,35 +405,43 @@ public final class SceneRenderer: NSView {
 
     // MARK: - Input
 
-    public override func mouseDown(with event: NSEvent) {
+    @objc private func handleClick(_ recognizer: NSClickGestureRecognizer) {
+        guard recognizer.state == .ended else { return }
+        handleTap(at: recognizer.location(in: self))
+    }
+
+    @objc private func handlePan(_ recognizer: NSPanGestureRecognizer) {
+        guard recognizer.state == .began || recognizer.state == .changed else { return }
+        handleDrag(at: recognizer.location(in: self))
+    }
+
+    func handleTap(at point: CGPoint) {
         guard let model = currentModel else { return }
-        let p = convert(event.locationInWindow, from: nil)
-        if model.layout.playPause.contains(p) && model.media.canPlayPause {
+        if model.layout.playPause.contains(point) && model.media.canPlayPause {
             onTogglePlayPause?()
             return
         }
-        if model.layout.brightness.contains(p) && model.brightnessAvailable {
-            let f = fraction(x: p.x, in: model.layout.brightness.insetBy(dx: 8, dy: 8))
+        if model.layout.brightness.contains(point) && model.brightnessAvailable {
+            let f = fraction(x: point.x, in: model.layout.brightness.insetBy(dx: 8, dy: 8))
             onBrightnessChange?(f)
             return
         }
-        if model.layout.volume.contains(p) && model.volumeAvailable {
-            let f = fraction(x: p.x, in: model.layout.volume.insetBy(dx: 8, dy: 8))
+        if model.layout.volume.contains(point) && model.volumeAvailable {
+            let f = fraction(x: point.x, in: model.layout.volume.insetBy(dx: 8, dy: 8))
             onVolumeChange?(f)
             return
         }
     }
 
-    public override func mouseDragged(with event: NSEvent) {
+    func handleDrag(at point: CGPoint) {
         guard let model = currentModel else { return }
-        let p = convert(event.locationInWindow, from: nil)
-        if model.layout.brightness.contains(p) && model.brightnessAvailable {
-            let f = fraction(x: p.x, in: model.layout.brightness.insetBy(dx: 8, dy: 8))
+        if model.layout.brightness.contains(point) && model.brightnessAvailable {
+            let f = fraction(x: point.x, in: model.layout.brightness.insetBy(dx: 8, dy: 8))
             onBrightnessChange?(f)
             return
         }
-        if model.layout.volume.contains(p) && model.volumeAvailable {
-            let f = fraction(x: p.x, in: model.layout.volume.insetBy(dx: 8, dy: 8))
+        if model.layout.volume.contains(point) && model.volumeAvailable {
+            let f = fraction(x: point.x, in: model.layout.volume.insetBy(dx: 8, dy: 8))
             onVolumeChange?(f)
             return
         }
