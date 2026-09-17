@@ -62,9 +62,11 @@ Re-run any probe with `./Install/run-probe.sh 0N` after building.
   The former green-square result was **insufficient**: it proved only that a
   small Control Strip tray item could be registered, not that a full-width
   renderer was presented. The revised probe registers a retained 🐾 tray anchor,
-  presents a separate recognizable bar through
-  `presentSystemModalTouchBar:systemTrayItemIdentifier:`, and reports attachment
-  geometry and post-Cmd-Tab persistence as separate results.
+  presents a separate recognizable bar through the placement-aware system-modal
+  selector (`placement: 1` for full width). Its custom view carries an explicit
+  685 × 30 constraint (an unconstrained view settles at only 445 points on this
+  macOS build), and the probe reports stable attachment geometry and post-Cmd-Tab
+  persistence as separate results.
 - **03 · Brightness read/write (DisplayServices):** ✅ ok · Read `0.4814`,
   wrote `0.5014` (return `0` = success), restored `0.4814` (return `0`). Uses
   private `DisplayServicesGetBrightness` / `DisplayServicesSetBrightness` from
@@ -232,8 +234,8 @@ diagnostic points to the enlarged preview and Probe 02 if neither path attaches.
 
 | Symbol | Framework | Purpose | Failure behavior |
 | --- | --- | --- | --- |
-| `DFRSetStatus`, `DFRElementSetControlStripPresenceForIdentifier` | DFRFoundation | Control Strip presence and presentation mode | Falls back to app-frontmost presenter automatically |
-| `addSystemTrayItem:`, `removeSystemTrayItem:`, `presentSystemModalTouchBar:systemTrayItemIdentifier:`, `dismissSystemModalTouchBar:` | AppKit runtime selectors | Retained tray anchor and full-width system-modal bar | Falls back if any selector is absent; attachment timeout is also treated as failure |
+| `DFRElementSetControlStripPresenceForIdentifier` | DFRFoundation | Control Strip anchor presence | Falls back to app-frontmost presenter automatically |
+| `addSystemTrayItem:`, `removeSystemTrayItem:`, `presentSystemModalTouchBar:placement:systemTrayItemIdentifier:`, `dismissSystemModalTouchBar:` | AppKit runtime selectors | Retained tray anchor and placement-1 full-width system-modal bar | Falls back if any selector is absent; attachment timeout is also treated as failure |
 | `DisplayServicesGetBrightness` / `DisplayServicesSetBrightness` | DisplayServices | Built-in display brightness on Apple Silicon | Brightness slot renders `.unavailable` (hatched sun) |
 | `MRMediaRemoteGetNowPlayingInfo`, `MRMediaRemoteSendCommand`, `MRMediaRemoteRegister…` | MediaRemote | Browser (Firefox/YouTube) playback tracking | Browser source reports `.unknown`; pet stays in free-roam |
 

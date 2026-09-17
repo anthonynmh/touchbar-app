@@ -18,12 +18,14 @@ final class TouchBarPresenterTests: XCTestCase {
 
         XCTAssertEqual(
             runtime.events,
-            ["addTray", "presence:true", "presentModal", "status:2"]
+            ["addTray", "presence:true", "presentModal:1:nil"]
         )
         XCTAssertEqual(presenter.state, .installing)
+        XCTAssertFalse(presenter.isInstalled)
 
         monitor.completeLast(with: .attached(geometry))
         XCTAssertEqual(presenter.state, .visible(geometry))
+        XCTAssertTrue(presenter.isInstalled)
     }
 
     func testHideShowDismissesAndRepresents() {
@@ -36,8 +38,8 @@ final class TouchBarPresenterTests: XCTestCase {
         presenter.uninstall()
 
         XCTAssertEqual(
-            Array(runtime.events.suffix(4)),
-            ["dismissModal", "presence:false", "removeTray", "status:0"]
+            Array(runtime.events.suffix(3)),
+            ["dismissModal", "presence:false", "removeTray"]
         )
         XCTAssertEqual(presenter.state, .hidden)
 
@@ -45,7 +47,7 @@ final class TouchBarPresenterTests: XCTestCase {
         monitor.completeLast(with: .attached(geometry))
 
         XCTAssertEqual(runtime.events.filter { $0 == "addTray" }.count, 2)
-        XCTAssertEqual(runtime.events.filter { $0 == "presentModal" }.count, 2)
+        XCTAssertEqual(runtime.events.filter { $0 == "presentModal:1:nil" }.count, 2)
         XCTAssertEqual(presenter.state, .visible(geometry))
     }
 
@@ -62,7 +64,6 @@ final class TouchBarPresenterTests: XCTestCase {
         XCTAssertEqual(runtime.events.filter { $0 == "dismissModal" }.count, 1)
         XCTAssertEqual(runtime.events.filter { $0 == "presence:false" }.count, 1)
         XCTAssertEqual(runtime.events.filter { $0 == "removeTray" }.count, 1)
-        XCTAssertEqual(runtime.events.filter { $0 == "status:0" }.count, 1)
     }
 
     func testMissingSelectorSelectsFallback() {
@@ -97,8 +98,8 @@ final class TouchBarPresenterTests: XCTestCase {
         monitor.completeLast(with: .timedOut)
 
         XCTAssertEqual(
-            Array(runtime.events.suffix(4)),
-            ["dismissModal", "presence:false", "removeTray", "status:0"]
+            Array(runtime.events.suffix(3)),
+            ["dismissModal", "presence:false", "removeTray"]
         )
         XCTAssertEqual(fallback.installCount, 1)
         XCTAssertEqual(presenter.state, .fallback(geometry))
@@ -141,8 +142,12 @@ private final class FakeRuntime: PersistentTouchBarRuntime {
         events.append("presence:\(present)")
     }
 
-    func presentSystemModalTouchBar(_ touchBar: NSTouchBar, trayIdentifier: String) -> Bool {
-        events.append("presentModal")
+    func presentSystemModalTouchBar(
+        _ touchBar: NSTouchBar,
+        placement: Int64,
+        trayIdentifier: String?
+    ) -> Bool {
+        events.append("presentModal:\(placement):\(trayIdentifier ?? "nil")")
         return true
     }
 
@@ -154,9 +159,6 @@ private final class FakeRuntime: PersistentTouchBarRuntime {
         events.append("removeTray")
     }
 
-    func setPresentationStatus(_ status: Int32) {
-        events.append("status:\(status)")
-    }
 }
 
 private final class FakeObservation: TouchBarAttachmentObservation {

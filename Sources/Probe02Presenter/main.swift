@@ -9,7 +9,6 @@
 import AppKit
 import Darwin
 
-typealias DFRSetStatus = @convention(c) (Int32) -> Void
 typealias DFRPresence = @convention(c) (CFString, Bool) -> Void
 
 private let trayIdentifier = "com.local.snappy-nest.probe02.tray"
@@ -35,6 +34,8 @@ final class ModalProbeView: NSView {
     var didAttach: ((NSRect, CGFloat) -> Void)?
     private var hasReportedAttachment = false
     private var pollTimer: Timer?
+    private var lastGeometry: (bounds: NSRect, scale: CGFloat)?
+    private var stableSampleCount = 0
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -51,12 +52,13 @@ final class ModalProbeView: NSView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        reportAttachmentIfReady()
+        // TouchBarServer may attach using the requested frame before its final
+        // composition pass. The polling path below waits for a stable size.
     }
 
     override func layout() {
         super.layout()
-        reportAttachmentIfReady()
+        needsDisplay = true
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -98,6 +100,15 @@ final class ModalProbeView: NSView {
               let window,
               bounds.width > 0, bounds.height > 0,
               window.frame.width > 0, window.frame.height > 0 else { return }
+        if let lastGeometry,
+           lastGeometry.bounds == bounds,
+           lastGeometry.scale == window.backingScaleFactor {
+            stableSampleCount += 1
+        } else {
+            lastGeometry = (bounds, window.backingScaleFactor)
+            stableSampleCount = 1
+        }
+        guard stableSampleCount >= 3 else { return }
         hasReportedAttachment = true
         pollTimer?.invalidate()
         pollTimer = nil
@@ -107,7 +118,6 @@ final class ModalProbeView: NSView {
 
 final class ProbeDelegate: NSObject, NSApplicationDelegate, NSTouchBarDelegate {
     private var handle: UnsafeMutableRawPointer?
-    private var dfrSetStatus: DFRSetStatus?
     private var dfrPresence: DFRPresence?
 
     private var trayItem: NSCustomTouchBarItem?
@@ -118,7 +128,6 @@ final class ProbeDelegate: NSObject, NSApplicationDelegate, NSTouchBarDelegate {
     private var modalPresented = false
     private var trayRegistered = false
     private var presenceEnabled = false
-    private var statusForced = false
     private var rendererAttached = false
     private var appSwitchDetected = false
     private var cleanedUp = false
@@ -126,7 +135,9 @@ final class ProbeDelegate: NSObject, NSApplicationDelegate, NSTouchBarDelegate {
 
     private let addSelector = NSSelectorFromString("addSystemTrayItem:")
     private let removeSelector = NSSelectorFromString("removeSystemTrayItem:")
-    private let presentSelector = NSSelectorFromString("presentSystemModalTouchBar:systemTrayItemIdentifier:")
+    private let presentSelector = NSSelectorFromString(
+        "presentSystemModalTouchBar:placement:systemTrayItemIdentifier:"
+    )
     private let dismissSelector = NSSelectorFromString("dismissSystemModalTouchBar:")
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -142,6 +153,11 @@ final class ProbeDelegate: NSObject, NSApplicationDelegate, NSTouchBarDelegate {
         tray.view = anchor
 
         let view = ModalProbeView(frame: NSRect(x: 0, y: 0, width: 685, height: 30))
+        view.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            view.widthAnchor.constraint(equalToConstant: 685),
+            view.heightAnchor.constraint(equalToConstant: 30)
+        ])
         view.didAttach = { [weak self] bounds, scale in
             guard let self else { return }
             self.rendererAttached = true
@@ -173,16 +189,32 @@ final class ProbeDelegate: NSObject, NSApplicationDelegate, NSTouchBarDelegate {
         presenceEnabled = true
 
         let barClass: AnyClass = NSTouchBar.self
-        _ = (barClass as AnyObject).perform(
+        guard let method = class_getClassMethod(barClass, presentSelector) else {
+            NSLog("PRESENTER fail reason=placement_method_missing_after_capability_check")
+            cleanupAndExit()
+            return
+        }
+        typealias PresentImplementation = @convention(c) (
+            AnyObject,
+            Selector,
+            NSTouchBar,
+            Int64,
+            AnyObject?
+        ) -> Void
+        let implementation = unsafeBitCast(
+            method_getImplementation(method),
+            to: PresentImplementation.self
+        )
+        implementation(
+            barClass as AnyObject,
             presentSelector,
-            with: bar,
-            with: trayIdentifier as NSString
+            bar,
+            1,
+            nil
         )
         modalPresented = true
-        dfrSetStatus?(2)
-        statusForced = true
 
-        NSLog("PRESENTER modal_requested tray_registered=1 status=2")
+        NSLog("PRESENTER modal_requested placement=1 tray_registered=1")
         NSLog("PRESENTER instruction=Cmd-Tab_to_another_app_to_test_persistence")
         observeApplicationSwitches()
 
@@ -213,13 +245,12 @@ final class ProbeDelegate: NSObject, NSApplicationDelegate, NSTouchBarDelegate {
             return false
         }
         self.handle = handle
-        dfrSetStatus = symbol(handle, "DFRSetStatus", as: DFRSetStatus.self)
         dfrPresence = symbol(
             handle,
             "DFRElementSetControlStripPresenceForIdentifier",
             as: DFRPresence.self
         )
-        guard dfrSetStatus != nil, dfrPresence != nil else {
+        guard dfrPresence != nil else {
             NSLog("PRESENTER fail reason=missing_dfr_symbols")
             return false
         }
@@ -288,10 +319,6 @@ final class ProbeDelegate: NSObject, NSApplicationDelegate, NSTouchBarDelegate {
         if trayRegistered, let trayItem {
             _ = (itemClass as AnyObject).perform(removeSelector, with: trayItem)
             trayRegistered = false
-        }
-        if statusForced {
-            dfrSetStatus?(0)
-            statusForced = false
         }
         NSLog("PRESENTER exit cleaned_up=1")
         NSApp.terminate(nil)

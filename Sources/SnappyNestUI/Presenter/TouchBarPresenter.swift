@@ -29,6 +29,15 @@ public enum TouchBarPresentationState: Equatable, Sendable {
             return false
         }
     }
+
+    public var isVisible: Bool {
+        switch self {
+        case .visible, .fallback:
+            return true
+        case .idle, .installing, .hidden, .failed:
+            return false
+        }
+    }
 }
 
 /// Presents the renderer on the physical Touch Bar and reports only verified
@@ -42,7 +51,7 @@ public protocol TouchBarPresenter: AnyObject {
 }
 
 public extension TouchBarPresenter {
-    var isInstalled: Bool { state.isPresentationRequested }
+    var isInstalled: Bool { state.isVisible }
 }
 
 protocol TouchBarAttachmentObservation: AnyObject {
@@ -83,6 +92,8 @@ final class SystemTouchBarAttachmentMonitor: TouchBarAttachmentMonitoring {
 
         let observation = TimerAttachmentObservation()
         let deadline = Date().addingTimeInterval(timeout)
+        var lastGeometry: TouchBarPresentationGeometry?
+        var stableSampleCount = 0
 
         func inspect() -> Bool {
             guard let window = view.window,
@@ -90,12 +101,23 @@ final class SystemTouchBarAttachmentMonitor: TouchBarAttachmentMonitoring {
                   window.frame.width > 0, window.frame.height > 0 else {
                 return false
             }
-            observation.cancel()
-            completion(.attached(TouchBarPresentationGeometry(
+            let geometry = TouchBarPresentationGeometry(
                 width: view.bounds.width,
                 height: view.bounds.height,
                 backingScale: window.backingScaleFactor
-            )))
+            )
+            if geometry == lastGeometry {
+                stableSampleCount += 1
+            } else {
+                lastGeometry = geometry
+                stableSampleCount = 1
+            }
+            // TouchBarServer initially attaches a view at its requested frame,
+            // then performs the real composition layout. Wait for that final
+            // size instead of reporting the transient requested width.
+            guard stableSampleCount >= 3 else { return false }
+            observation.cancel()
+            completion(.attached(geometry))
             return true
         }
 
@@ -147,6 +169,7 @@ public final class AppFrontmostPresenter: NSObject, TouchBarPresenter {
     private var hostWindow: TouchBarHostWindow?
     private var touchBar: NSTouchBar?
     private var rendererItem: NSCustomTouchBarItem?
+    private var rendererConstraints: [NSLayoutConstraint] = []
     private var touchBarDelegate: RendererTouchBarDelegate?
     private var attachmentObservation: TouchBarAttachmentObservation?
     private var generation = 0
@@ -178,6 +201,12 @@ public final class AppFrontmostPresenter: NSObject, TouchBarPresenter {
         setState(.installing)
 
         rendererView.frame = NSRect(x: 0, y: 0, width: 685, height: 30)
+        rendererView.translatesAutoresizingMaskIntoConstraints = false
+        rendererConstraints = [
+            rendererView.widthAnchor.constraint(equalToConstant: 685),
+            rendererView.heightAnchor.constraint(equalToConstant: 30)
+        ]
+        NSLayoutConstraint.activate(rendererConstraints)
         let item = NSCustomTouchBarItem(identifier: itemIdentifier)
         item.view = rendererView
         item.customizationLabel = "Snappy Nest"
@@ -245,6 +274,9 @@ public final class AppFrontmostPresenter: NSObject, TouchBarPresenter {
         hostWindow?.touchBar = nil
         hostWindow?.orderOut(nil)
         rendererView.removeFromSuperview()
+        NSLayoutConstraint.deactivate(rendererConstraints)
+        rendererConstraints.removeAll()
+        rendererView.translatesAutoresizingMaskIntoConstraints = true
         rendererItem?.view = NSView(frame: .zero)
         rendererItem = nil
         touchBarDelegate = nil
@@ -262,35 +294,35 @@ protocol PersistentTouchBarRuntime: AnyObject {
     var capabilityFailureReason: String? { get }
     func addSystemTrayItem(_ item: NSCustomTouchBarItem) -> Bool
     func setControlStripPresence(identifier: String, present: Bool)
-    func presentSystemModalTouchBar(_ touchBar: NSTouchBar, trayIdentifier: String) -> Bool
+    func presentSystemModalTouchBar(
+        _ touchBar: NSTouchBar,
+        placement: Int64,
+        trayIdentifier: String?
+    ) -> Bool
     func dismissSystemModalTouchBar(_ touchBar: NSTouchBar)
     func removeSystemTrayItem(_ item: NSCustomTouchBarItem)
-    func setPresentationStatus(_ status: Int32)
 }
 
 final class SystemPersistentTouchBarRuntime: PersistentTouchBarRuntime {
-    private typealias DFRSetStatus = @convention(c) (Int32) -> Void
     private typealias DFRPresence = @convention(c) (CFString, Bool) -> Void
 
     private let handle: UnsafeMutableRawPointer?
-    private let dfrSetStatus: DFRSetStatus?
     private let dfrPresence: DFRPresence?
 
     private let addSelector = NSSelectorFromString("addSystemTrayItem:")
     private let removeSelector = NSSelectorFromString("removeSystemTrayItem:")
-    private let presentSelector = NSSelectorFromString("presentSystemModalTouchBar:systemTrayItemIdentifier:")
+    private let presentSelector = NSSelectorFromString(
+        "presentSystemModalTouchBar:placement:systemTrayItemIdentifier:"
+    )
     private let dismissSelector = NSSelectorFromString("dismissSystemModalTouchBar:")
 
     init() {
         let path = "/System/Library/PrivateFrameworks/DFRFoundation.framework/DFRFoundation"
         handle = dlopen(path, RTLD_LAZY | RTLD_LOCAL)
         if let handle,
-           let setSymbol = dlsym(handle, "DFRSetStatus"),
            let presenceSymbol = dlsym(handle, "DFRElementSetControlStripPresenceForIdentifier") {
-            dfrSetStatus = unsafeBitCast(setSymbol, to: DFRSetStatus.self)
             dfrPresence = unsafeBitCast(presenceSymbol, to: DFRPresence.self)
         } else {
-            dfrSetStatus = nil
             dfrPresence = nil
         }
     }
@@ -300,7 +332,7 @@ final class SystemPersistentTouchBarRuntime: PersistentTouchBarRuntime {
     }
 
     var capabilityFailureReason: String? {
-        guard handle != nil, dfrSetStatus != nil, dfrPresence != nil else {
+        guard handle != nil, dfrPresence != nil else {
             return "DFRFoundation symbols unavailable"
         }
         let itemClass: AnyClass = NSTouchBarItem.self
@@ -312,7 +344,7 @@ final class SystemPersistentTouchBarRuntime: PersistentTouchBarRuntime {
         }
         let barClass: AnyClass = NSTouchBar.self
         guard (barClass as AnyObject).responds(to: presentSelector) else {
-            return "presentSystemModalTouchBar:systemTrayItemIdentifier: selector unavailable"
+            return "presentSystemModalTouchBar:placement:systemTrayItemIdentifier: selector unavailable"
         }
         guard (barClass as AnyObject).responds(to: dismissSelector) else {
             return "dismissSystemModalTouchBar: selector unavailable"
@@ -331,13 +363,31 @@ final class SystemPersistentTouchBarRuntime: PersistentTouchBarRuntime {
         dfrPresence?(identifier as CFString, present)
     }
 
-    func presentSystemModalTouchBar(_ touchBar: NSTouchBar, trayIdentifier: String) -> Bool {
+    func presentSystemModalTouchBar(
+        _ touchBar: NSTouchBar,
+        placement: Int64,
+        trayIdentifier: String?
+    ) -> Bool {
         let barClass: AnyClass = NSTouchBar.self
-        guard (barClass as AnyObject).responds(to: presentSelector) else { return false }
-        _ = (barClass as AnyObject).perform(
+        guard (barClass as AnyObject).responds(to: presentSelector),
+              let method = class_getClassMethod(barClass, presentSelector) else { return false }
+        typealias PresentImplementation = @convention(c) (
+            AnyObject,
+            Selector,
+            NSTouchBar,
+            Int64,
+            AnyObject?
+        ) -> Void
+        let implementation = unsafeBitCast(
+            method_getImplementation(method),
+            to: PresentImplementation.self
+        )
+        implementation(
+            barClass as AnyObject,
             presentSelector,
-            with: touchBar,
-            with: trayIdentifier as NSString
+            touchBar,
+            placement,
+            trayIdentifier as NSString?
         )
         return true
     }
@@ -354,9 +404,6 @@ final class SystemPersistentTouchBarRuntime: PersistentTouchBarRuntime {
         _ = (itemClass as AnyObject).perform(removeSelector, with: item)
     }
 
-    func setPresentationStatus(_ status: Int32) {
-        dfrSetStatus?(status)
-    }
 }
 
 /// Persistent presenter. The Control Strip item is only a small retained
@@ -379,6 +426,7 @@ public final class PersistentPresenter: NSObject, TouchBarPresenter {
     private var trayItem: NSCustomTouchBarItem?
     private var modalTouchBar: NSTouchBar?
     private var rendererItem: NSCustomTouchBarItem?
+    private var rendererConstraints: [NSLayoutConstraint] = []
     private var touchBarDelegate: RendererTouchBarDelegate?
     private var fallbackPresenter: TouchBarPresenter?
     private var attachmentObservation: TouchBarAttachmentObservation?
@@ -386,7 +434,6 @@ public final class PersistentPresenter: NSObject, TouchBarPresenter {
     private var trayRegistered = false
     private var presenceEnabled = false
     private var modalPresented = false
-    private var statusForced = false
     private var generation = 0
 
     public convenience init(rendererView: SceneRenderer) {
@@ -438,6 +485,12 @@ public final class PersistentPresenter: NSObject, TouchBarPresenter {
         tray.customizationLabel = "Snappy Nest"
 
         rendererView.frame = NSRect(x: 0, y: 0, width: 685, height: 30)
+        rendererView.translatesAutoresizingMaskIntoConstraints = false
+        rendererConstraints = [
+            rendererView.widthAnchor.constraint(equalToConstant: 685),
+            rendererView.heightAnchor.constraint(equalToConstant: 30)
+        ]
+        NSLayoutConstraint.activate(rendererConstraints)
         let rendererItem = NSCustomTouchBarItem(identifier: rendererIdentifier)
         rendererItem.view = rendererView
         rendererItem.customizationLabel = "Snappy Nest World"
@@ -462,13 +515,18 @@ public final class PersistentPresenter: NSObject, TouchBarPresenter {
         runtime.setControlStripPresence(identifier: trayIdentifier, present: true)
         presenceEnabled = true
 
-        guard runtime.presentSystemModalTouchBar(bar, trayIdentifier: trayIdentifier) else {
+        // Pock's established full-width path uses placement 1 with no system
+        // tray identifier. Passing the registered tray identifier composes the
+        // modal beside that region and leaves only ~445 pt on this hardware.
+        guard runtime.presentSystemModalTouchBar(
+            bar,
+            placement: 1,
+            trayIdentifier: nil
+        ) else {
             beginFallback(after: "system-modal presentation failed", generation: installGeneration)
             return
         }
         modalPresented = true
-        runtime.setPresentationStatus(2)
-        statusForced = true
 
         attachmentObservation = attachmentMonitor.start(
             observing: rendererView,
@@ -547,12 +605,10 @@ public final class PersistentPresenter: NSObject, TouchBarPresenter {
             runtime.removeSystemTrayItem(trayItem)
             trayRegistered = false
         }
-        if statusForced {
-            runtime.setPresentationStatus(0)
-            statusForced = false
-        }
-
         rendererView.removeFromSuperview()
+        NSLayoutConstraint.deactivate(rendererConstraints)
+        rendererConstraints.removeAll()
+        rendererView.translatesAutoresizingMaskIntoConstraints = true
         rendererItem?.view = NSView(frame: .zero)
         rendererItem = nil
         touchBarDelegate = nil
