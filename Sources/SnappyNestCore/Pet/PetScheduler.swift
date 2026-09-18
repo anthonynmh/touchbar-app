@@ -76,6 +76,12 @@ public final class PetActionScheduler {
         return Decision(action: action, holdSeconds: hold)
     }
 
+    /// A fresh destination along the roam region, as a fraction of its
+    /// width. Consumes RNG state so movement stays seed-deterministic.
+    public func nextTargetFraction() -> Double {
+        rng.nextDouble()
+    }
+
     /// Yield an action explicitly (used when progress-follow mode ends and
     /// we need to fall back to free-roam without a stale nextAction). Does
     /// not consume RNG state.

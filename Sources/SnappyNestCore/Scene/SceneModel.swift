@@ -70,13 +70,16 @@ public struct SceneComposer {
     ) -> SceneModel {
         let regions = layout.regions
         let time = WorldTime(from: now, in: calendar)
-        let bodyInset = min(CelestialSolver.bodyHalfWidth, regions.middle.width / 2)
+        // The sun/moon and props belong to the world page; on the controls
+        // page they are computed for the world geometry and simply not drawn.
+        let world = layout.with(page: .world).regions.middle
+        let bodyInset = min(CelestialSolver.bodyHalfWidth, world.width / 2)
         let celestial = CelestialSolver.position(
             for: time,
             sceneSize: layout.bounds.size,
-            horizontalRange: (regions.middle.minX + bodyInset)...(regions.middle.maxX - bodyInset)
+            horizontalRange: (world.minX + bodyInset)...(world.maxX - bodyInset)
         )
-        let props = SceneLayout.defaultObjects(inside: regions.middle)
+        let props = regions.page == .world ? SceneLayout.defaultObjects(inside: world) : []
         let progress = media.progressFraction(at: now)
 
         return SceneModel(

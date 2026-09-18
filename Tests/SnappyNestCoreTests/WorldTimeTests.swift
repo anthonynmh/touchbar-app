@@ -46,4 +46,30 @@ final class WorldTimeTests: XCTestCase {
         XCTAssertFalse(WorldTime(hour: 18, minute: 0, second: 0).isDaytime)
         XCTAssertFalse(WorldTime(hour: 5, minute: 59, second: 0).isDaytime)
     }
+
+    func testDaylightRampsAroundSunriseAndSunset() {
+        XCTAssertEqual(WorldTime(hour: 3, minute: 0, second: 0).daylight, 0, accuracy: 1e-9)
+        XCTAssertEqual(WorldTime(hour: 5, minute: 30, second: 0).daylight, 0, accuracy: 1e-9)
+        XCTAssertEqual(WorldTime(hour: 6, minute: 0, second: 0).daylight, 0.5, accuracy: 1e-9)
+        XCTAssertEqual(WorldTime(hour: 6, minute: 30, second: 0).daylight, 1, accuracy: 1e-9)
+        XCTAssertEqual(WorldTime(hour: 12, minute: 0, second: 0).daylight, 1, accuracy: 1e-9)
+        XCTAssertEqual(WorldTime(hour: 18, minute: 0, second: 0).daylight, 0.5, accuracy: 1e-9)
+        XCTAssertEqual(WorldTime(hour: 18, minute: 30, second: 0).daylight, 0, accuracy: 1e-9)
+    }
+
+    func testTwilightPeaksAtDawnAndDusk() {
+        XCTAssertEqual(WorldTime(hour: 6, minute: 0, second: 0).twilight, 1, accuracy: 1e-9)
+        XCTAssertEqual(WorldTime(hour: 18, minute: 0, second: 0).twilight, 1, accuracy: 1e-9)
+        XCTAssertEqual(WorldTime(hour: 12, minute: 0, second: 0).twilight, 0, accuracy: 1e-9)
+        XCTAssertEqual(WorldTime(hour: 0, minute: 0, second: 0).twilight, 0, accuracy: 1e-9)
+        XCTAssertGreaterThan(WorldTime(hour: 17, minute: 30, second: 0).twilight, 0)
+    }
+
+    func testClockLabelFollowsLocaleHourCycle() {
+        let t = WorldTime(hour: 14, minute: 5, second: 0)
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "UTC")!
+        XCTAssertEqual(t.clockLabel(calendar: cal, locale: Locale(identifier: "en_GB")), "14:05")
+        XCTAssertTrue(t.clockLabel(calendar: cal, locale: Locale(identifier: "en_US")).hasPrefix("2:05"))
+    }
 }

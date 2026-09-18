@@ -46,6 +46,31 @@ same notes. Keep all content here; do not duplicate it in `CLAUDE.md`.
   celestial sprites inside the middle region so they cannot overlap the battery
   health bar or the controls.
 
+## Rendering findings
+
+- A `CGImage` assigned to `CALayer.contents` is displayed as an ordinary
+  picture (first row at the top) even though the renderer view is flipped.
+  Draw sprites in a y-down context (`PetSprites.render`) so cell coordinates
+  match the scene's flipped coordinates; the original placeholder pet drew in
+  a bottom-origin context and therefore appeared upside down.
+- `CALayer.render(in:)` on the flipped renderer applies the flip, so an
+  offscreen capture must invert its context (see `SceneSnapshotTests`).
+- The 30-point strip fits a 24-point pet cell with the feet on
+  `middle.maxY - 4`; the four rows above the head hold accents. Keep every
+  detail at 1 point (2 px) or larger.
+- The sky image is regenerated only when the minute changes
+  (`SkyPainter.Key`); everything else is a cached per-state glyph, so a frame
+  costs only layer `contents` swaps.
+- Paging is a camera: the world and controls containers are full-width
+  `CALayer`s whose `position.x` follows an `NSPanGestureRecognizer`
+  (`allowedTouchTypes = .direct`) and snaps with a `CABasicAnimation`. The
+  same recognizer scrubs a slider when the drag starts on a live track, so
+  hit-testing decides slider-vs-pan at `.began`, never mid-gesture. Verified
+  on hardware 2026-09-18: the scene follows the finger, snaps cleanly, and
+  the sliders still scrub.
+- Users found a tap-to-toggle tab and a translucent control panel broke the
+  immersion; the controls must sit in the same sky and terrain as the pet.
+
 ## Volume control findings
 
 - Brightness and volume share the same renderer gesture routing; brightness
@@ -120,3 +145,16 @@ same notes. Keep all content here; do not duplicate it in `CLAUDE.md`.
   never launches Spotify or (via MediaRemote) the default media app. The bridge
   is injectable and nine isolated `SpotifyMediaSourceTests` cover the policy.
   Probe 05 uses the same guards.
+- 2026-09-18 — Replaced the placeholder art and the 24-hour panorama on
+  `feat/pet-scene-polish`: procedural 24-point cat-like pet with per-action
+  expressions, free-roam movement, tap reactions and walk-to-tap; live sky
+  keyed to the clock with stars, hills, and grass; sun/moon rise at the left
+  and set at the right of the middle region; tap-to-reveal clock; battery
+  glyph with percentage; filled sliders with icons. Progress-follow remains the
+  top-priority pet mode. Snapshot tests (`SNAPPY_SNAPSHOT_DIR`) render review
+  PNGs. Verified on hardware: pet, taps, clock reveal, sliders, battery.
+- 2026-09-18 — Replaced the fixed left/right UI columns with a two-page camera
+  (world ↔ controls) panned by dragging the scene; a first tab-toggle version
+  was rejected as "collapsible", and a translucent panel behind the controls
+  was rejected for breaking immersion. The final controls page is a compact
+  centered cluster over continuous terrain. Verified on hardware.
