@@ -1,9 +1,11 @@
 # Snappy Nest — a native Touch Bar world for the M1 13" MacBook Pro
 
-A single-screen pixel-art world that lives on the Touch Bar: a fixed 24-hour panorama
-(midnight → noon → next midnight) with a sun/moon showing the current local time, an
-orange fantasy pet roaming the middle third, a segmented battery meter on the left,
-and directly-draggable brightness + volume + contextual play/pause on the right.
+A single-screen pixel-art world that lives on the Touch Bar: a live sky that follows
+the local time of day (dawn glow, blue noon, starry night) with the sun and moon
+crossing the middle region, an orange cat-like pet that roams, reacts to taps, and
+walks where you tap, a battery glyph with percentage on the left, and directly-draggable
+brightness + volume + contextual play/pause on the right. Tap the sun or moon to see
+the time.
 
 Local-only. No cloud, no telemetry, no microphone, and no network code. Works
 fully offline. The current local build is not App-Sandboxed.
@@ -101,15 +103,28 @@ Re-run any probe with `./Install/run-probe.sh 0N` after building. Probes 03 and
 
 Current build (`v0.1.0-dev`), verified on this Mac on 2026-09-18:
 
-- ✅ 24-hour panorama with per-column color bands, sun/moon indicator with
-  midnight-seam duplicate rendering, hour ticks stronger at 00/06/12/18/24.
+- ✅ Live sky keyed to the wall clock: vertical zenith→horizon gradient
+  interpolated between hourly keyframes, stars that fade with daylight, a warm
+  horizon glow at dawn/dusk, hills and grass across the middle region, and
+  translucent panels behind the battery and controls (`SkyPainter`, cached per
+  minute).
+- ✅ Sun rises at the left of the middle region at 06:00, peaks at noon, sets
+  at the right at 18:00; the moon does the same overnight. Tapping either
+  reveals a localized clock for three seconds.
+- ✅ Procedural cat-like pet (`PetSprites`, 24-point cell) with a pose and
+  expression for every action, real walking/dashing between seeded
+  destinations, a happy/surprised reaction when tapped, and walk-to-tap on the
+  ground. Playback progress-follow still takes priority whenever media with a
+  known position is playing.
 - ✅ Layer-backed `SceneRenderer` at nearest-neighbor filtering,
   measured-bounds pixel-alignment (2× on this Mac).
-- ✅ Segmented battery health bar with charging bolt, fed from IOPS.
+- ✅ Battery glyph with proportional fill (green / amber / red), a drawn charging
+  bolt, and a percentage label, fed from IOPS.
 - ✅ Directly-draggable brightness (`DisplayServices`) and volume (Core Audio),
   including preferred-stereo fallback, mute handling, confirmed readback, and
-  rollback after partial write failure.
-- ✅ Contextual play/pause reserved slot; toggles the active media source.
+  rollback after partial write failure. Sliders show a filled track, a large
+  knob, and sun/speaker icons whose arcs follow the level; mute shows a slash.
+- ✅ Contextual play/pause button (circle glyph); toggles the active media source.
 - ✅ Pet state machine (12 actions) with seeded, hour-of-day-weighted
   free-roam scheduler; progress-follow mode when duration+position are
   known; **battery is not a scheduler input** (enforced by types + test).
@@ -132,7 +147,9 @@ Deferred / follow-up:
 
 - Full Preferences window with SMAppService launch-at-login, Reduce Motion
   override, escape-hatch shortcut recorder, debug simulation panel.
-- Real sprite atlases (current release ships labeled placeholder art).
+- Optional PNG sprite atlases. The pet is drawn procedurally by `PetSprites`;
+  an atlas loader would replace `PetSprites.image(action:frame:facing:scale:)`
+  without touching the renderer or controller.
 - Additional media adapters beyond Spotify + browser.
 
 ## Repository layout
@@ -154,8 +171,8 @@ touchbar-pet/
     Probe04Volume/             # Core Audio roundtrip
     Probe05Media/              # Spotify + MediaRemote adapters
   Tests/
-    SnappyNestCoreTests/       # 55 model/provider XCTest cases
-    SnappyNestUITests/         # 8 renderer/presenter XCTest cases
+    SnappyNestCoreTests/       # 84 model/provider XCTest cases
+    SnappyNestUITests/         # 20 renderer/presenter/snapshot XCTest cases
   Install/
     install.sh   uninstall.sh   clean.sh   wrap-as-app.sh   run-probe.sh
   Makefile
@@ -270,7 +287,11 @@ simulation panel for clock / battery / playback. All state will persist to
 
 ## Testing
 
-- `swift test` runs 63 tests: 55 core/provider tests and 8 UI/presenter tests.
+- `swift test` runs 104 tests: 84 core/provider tests and 20 UI/presenter tests
+  (three snapshot tests are skipped unless `SNAPPY_SNAPSHOT_DIR` is set).
+- `SNAPPY_SNAPSHOT_DIR=/some/dir swift test --filter SceneSnapshotTests` writes
+  PNGs of the pet clip sheet, the battery/control glyphs, and the full strip at
+  several hours, for reviewing artwork without hardware.
 - `./Install/run-probe.sh 0N` (N = 1…5) rebuilds and runs a specific probe.
 - `./Install/run-probe.sh 03` and `04` perform read-only diagnostics by default.
   Add `--write` for a small verified round trip with mute preserved. Probe 04
@@ -284,7 +305,8 @@ simulation panel for clock / battery / playback. All state will persist to
   genuinely repeats its panorama position and a skipped hour (spring-forward)
   is genuinely skipped.
 - Renderer smoke test: launch the app, open **Enlarged Preview…**, verify
-  the pet, celestial body, and controls render at 6×.
+  the pet, celestial body, and controls render at 6×. On hardware, tap the pet
+  (reaction), tap the ground (walk-to), and tap the sun/moon (clock).
 
 ## Troubleshooting
 

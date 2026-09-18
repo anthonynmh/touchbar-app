@@ -46,6 +46,22 @@ same notes. Keep all content here; do not duplicate it in `CLAUDE.md`.
   celestial sprites inside the middle region so they cannot overlap the battery
   health bar or the controls.
 
+## Rendering findings
+
+- A `CGImage` assigned to `CALayer.contents` is displayed as an ordinary
+  picture (first row at the top) even though the renderer view is flipped.
+  Draw sprites in a y-down context (`PetSprites.render`) so cell coordinates
+  match the scene's flipped coordinates; the original placeholder pet drew in
+  a bottom-origin context and therefore appeared upside down.
+- `CALayer.render(in:)` on the flipped renderer applies the flip, so an
+  offscreen capture must invert its context (see `SceneSnapshotTests`).
+- The 30-point strip fits a 24-point pet cell with the feet on
+  `middle.maxY - 4`; the four rows above the head hold accents. Keep every
+  detail at 1 point (2 px) or larger.
+- The sky image is regenerated only when the minute changes
+  (`SkyPainter.Key`); everything else is a cached per-state glyph, so a frame
+  costs only layer `contents` swaps.
+
 ## Volume control findings
 
 - Brightness and volume share the same renderer gesture routing; brightness
@@ -120,3 +136,11 @@ same notes. Keep all content here; do not duplicate it in `CLAUDE.md`.
   never launches Spotify or (via MediaRemote) the default media app. The bridge
   is injectable and nine isolated `SpotifyMediaSourceTests` cover the policy.
   Probe 05 uses the same guards.
+- 2026-09-18 — Replaced the placeholder art and the 24-hour panorama on
+  `feat/pet-scene-polish`: procedural 24-point cat-like pet with per-action
+  expressions, free-roam movement, tap reactions and walk-to-tap; live sky
+  keyed to the clock with stars, hills, and grass; sun/moon rise at the left
+  and set at the right of the middle region; tap-to-reveal clock; battery
+  glyph with percentage; filled sliders with icons. Progress-follow remains the
+  top-priority pet mode. Snapshot tests (`SNAPPY_SNAPSHOT_DIR`) render review
+  PNGs; hardware verification recorded below when performed.
