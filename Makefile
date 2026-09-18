@@ -16,9 +16,9 @@
 # `install` builds unsigned .app bundles — right-click → Open on first launch
 # to bypass Gatekeeper.
 
-VERSION := 0.1.0
-STAGE   := build/stage
-DIST    := dist
+override VERSION := 0.1.0
+override STAGE   := build/stage
+override DIST    := dist
 
 .PHONY: build test run install uninstall clean dmg notarize
 
@@ -27,10 +27,23 @@ build:
 
 test:
 	swift test
+	./Tests/ShellSafetyTests/run.sh
 
 run: build
-	./Install/wrap-as-app.sh .build/debug/TouchbarPet com.local.snappy-nest $(STAGE) TouchbarPet > /dev/null
-	$(STAGE)/TouchbarPet.app/Contents/MacOS/TouchbarPet
+	@set -eu; \
+	if [ -L "build" ] || { [ -e "build" ] && [ ! -d "build" ]; }; then \
+		echo "error: unsafe build staging parent" >&2; exit 1; \
+	fi; \
+	mkdir -p "build"; \
+	if [ -L "$(STAGE)" ] || { [ -e "$(STAGE)" ] && [ ! -d "$(STAGE)" ]; }; then \
+		echo "error: unsafe staging directory: $(STAGE)" >&2; exit 1; \
+	fi; \
+	mkdir -p "$(STAGE)"; \
+	stage_dir=$$(mktemp -d "$$(pwd -P)/$(STAGE)/run.XXXXXX"); \
+	trap 'rm -rf "$$stage_dir"' EXIT HUP INT TERM; \
+	app_path=$$(./Install/wrap-as-app.sh \
+		".build/debug/TouchbarPet" "com.local.snappy-nest" "$$stage_dir" "TouchbarPet"); \
+	"$$app_path/Contents/MacOS/TouchbarPet"
 
 install:
 	./Install/install.sh
@@ -39,7 +52,7 @@ uninstall:
 	./Install/uninstall.sh
 
 clean:
-	rm -rf .build $(STAGE) $(DIST)
+	./Install/clean.sh
 
 # ---- dmg + notarize -------------------------------------------------------
 
@@ -47,16 +60,29 @@ dmg: build
 	@if [ -z "$${SIGNING_IDENTITY:-}" ]; then \
 		echo "error: SIGNING_IDENTITY must be set" >&2 ; exit 1 ; \
 	fi
-	mkdir -p $(STAGE) $(DIST)
-	./Install/wrap-as-app.sh .build/debug/TouchbarPet com.local.snappy-nest $(STAGE) TouchbarPet > /dev/null
+	@set -eu; \
+	if [ -L "build" ] || { [ -e "build" ] && [ ! -d "build" ]; }; then \
+		echo "error: unsafe build staging parent" >&2; exit 1; \
+	fi; \
+	mkdir -p "build"; \
+	if [ -L "$(STAGE)" ] || { [ -e "$(STAGE)" ] && [ ! -d "$(STAGE)" ]; }; then \
+		echo "error: unsafe staging directory: $(STAGE)" >&2; exit 1; \
+	fi; \
+	if [ -L "$(DIST)" ] || { [ -e "$(DIST)" ] && [ ! -d "$(DIST)" ]; }; then \
+		echo "error: unsafe distribution directory: $(DIST)" >&2; exit 1; \
+	fi; \
+	mkdir -p "$(STAGE)" "$(DIST)"; \
+	stage_dir=$$(mktemp -d "$$(pwd -P)/$(STAGE)/dmg.XXXXXX"); \
+	trap 'rm -rf "$$stage_dir"' EXIT HUP INT TERM; \
+	app_path=$$(./Install/wrap-as-app.sh \
+		".build/debug/TouchbarPet" "com.local.snappy-nest" "$$stage_dir" "TouchbarPet"); \
 	codesign --deep --force --options runtime \
-		--sign "$${SIGNING_IDENTITY}" \
-		$(STAGE)/TouchbarPet.app
-	rm -f $(DIST)/TouchbarPet-$(VERSION).dmg
-	hdiutil create -srcfolder $(STAGE)/TouchbarPet.app \
+		--sign "$${SIGNING_IDENTITY}" "$$app_path"; \
+	rm -f "$(DIST)/TouchbarPet-$(VERSION).dmg"; \
+	hdiutil create -srcfolder "$$app_path" \
 		-volname "Snappy Nest $(VERSION)" \
 		-format UDZO \
-		$(DIST)/TouchbarPet-$(VERSION).dmg
+		"$(DIST)/TouchbarPet-$(VERSION).dmg"
 	@echo "==> $(DIST)/TouchbarPet-$(VERSION).dmg"
 
 notarize:

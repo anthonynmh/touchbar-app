@@ -4,8 +4,8 @@
 # What this does:
 #   1. sanity-checks: not root, macOS ≥ 26, arm64, Xcode present
 #   2. swift build -c release
-#   3. wraps the TouchbarPet executable in a minimal .app bundle
-#   4. asks before overwriting an existing /Applications/TouchbarPet.app
+#   3. asks before replacing an existing /Applications/TouchbarPet.app
+#   4. wraps and atomically installs a complete .app bundle
 #   5. prints the escape-hatch shortcut and where to find README.md
 #
 # What this does NOT do:
@@ -13,7 +13,7 @@
 #   - never touches /System or /Library
 #   - never installs privileged helpers
 #   - never enables launch-at-login silently (Preferences opt-in)
-#   - never makes a network request
+#   - contains no command that makes a network request
 
 set -euo pipefail
 
@@ -59,25 +59,55 @@ if [ ! -x "$EXEC_PATH" ]; then
     exit 1
 fi
 
-# ---- 3. wrap as .app -------------------------------------------------------
-
-STAGE_DIR="$REPO/build/stage"
-mkdir -p "$STAGE_DIR"
-APP_PATH=$("$REPO/Install/wrap-as-app.sh" "$EXEC_PATH" "com.local.snappy-nest" "$STAGE_DIR" "TouchbarPet")
-echo "==> staged at $APP_PATH"
-
-# ---- 4. install to /Applications -------------------------------------------
+# ---- 3. confirm replacement ------------------------------------------------
 
 DEST="/Applications/TouchbarPet.app"
-if [ -e "$DEST" ]; then
+if [ -L "$DEST" ]; then
+    echo "error: refusing to replace symlinked destination: $DEST" >&2
+    exit 1
+fi
+if [ -e "$DEST" ] && [ ! -d "$DEST" ]; then
+    echo "error: destination exists but is not an app directory: $DEST" >&2
+    exit 1
+fi
+if [ -d "$DEST" ]; then
     printf "==> %s already exists. Overwrite? [y/N] " "$DEST"
     read -r reply
     case "$reply" in
-        y|Y) rm -rf "$DEST" ;;
+        y|Y) ;;
         *) echo "aborted."; exit 1 ;;
     esac
 fi
-cp -R "$APP_PATH" "$DEST"
+
+# ---- 4. stage beside destination and replace atomically --------------------
+
+umask 077
+STAGE_DIR=$(mktemp -d "/Applications/.TouchbarPet-install.XXXXXX")
+cleanup_stage() {
+    case "$STAGE_DIR" in
+        /Applications/.TouchbarPet-install.*)
+            if [ -d "$STAGE_DIR" ] && [ ! -L "$STAGE_DIR" ]; then
+                rm -rf -- "$STAGE_DIR"
+            fi
+            ;;
+        *) echo "warning: refusing unexpected staging cleanup path: $STAGE_DIR" >&2 ;;
+    esac
+}
+interrupted() {
+    trap - EXIT HUP INT TERM
+    cleanup_stage
+    exit 130
+}
+trap cleanup_stage EXIT
+trap interrupted HUP INT TERM
+
+APP_PATH=$("$REPO/Install/wrap-as-app.sh" \
+    "$EXEC_PATH" \
+    "com.local.snappy-nest" \
+    "$STAGE_DIR" \
+    "TouchbarPet")
+echo "==> staged complete bundle at $APP_PATH"
+xcrun swift "$REPO/Install/atomic-replace.swift" "$APP_PATH" "$DEST"
 
 # ---- 5. summary ------------------------------------------------------------
 
@@ -88,7 +118,7 @@ cat <<EOF
 Getting started:
   * Launch from Spotlight or the Applications folder
   * The 🐾 menu bar icon opens the app menu
-  * Escape hatch: press Opt+Cmd+\\ to reclaim the default Touch Bar
+  * Escape hatch: use the menu, or its Opt+Cmd+\\ key equivalent while active
   * README.md: $REPO/README.md
 
 macOS may ask to allow Automation for Spotify on first playback; accept the

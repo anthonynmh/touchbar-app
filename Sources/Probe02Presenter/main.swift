@@ -9,6 +9,21 @@
 import AppKit
 import Darwin
 
+if let flagIndex = CommandLine.arguments.firstIndex(of: "--snappy-pid-file"),
+   CommandLine.arguments.indices.contains(flagIndex + 1) {
+    let pidPath = CommandLine.arguments[flagIndex + 1]
+    do {
+        try "\(ProcessInfo.processInfo.processIdentifier)\n".write(
+            toFile: pidPath,
+            atomically: true,
+            encoding: .utf8
+        )
+    } catch {
+        NSLog("PRESENTER fail reason=pid_file error=%@", error.localizedDescription)
+        exit(1)
+    }
+}
+
 typealias DFRPresence = @convention(c) (CFString, Bool) -> Void
 
 private let fullTouchBarWidth: CGFloat = 1085

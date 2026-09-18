@@ -11,6 +11,21 @@
 
 import AppKit
 
+if let flagIndex = CommandLine.arguments.firstIndex(of: "--snappy-pid-file"),
+   CommandLine.arguments.indices.contains(flagIndex + 1) {
+    let pidPath = CommandLine.arguments[flagIndex + 1]
+    do {
+        try "\(ProcessInfo.processInfo.processIdentifier)\n".write(
+            toFile: pidPath,
+            atomically: true,
+            encoding: .utf8
+        )
+    } catch {
+        NSLog("TOUCHBAR_BOUNDS fail reason=pid_file error=%@", error.localizedDescription)
+        exit(1)
+    }
+}
+
 let itemIdentifier = NSTouchBarItem.Identifier("com.local.snappy-nest.probe01.strip")
 
 final class ProbeView: NSView {
