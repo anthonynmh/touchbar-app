@@ -28,6 +28,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var touchBarBounds = NSRect(x: 0, y: 0, width: 1085, height: 30)
     private let seed: UInt64 = 0xC0FF_EECA_FED0_0DF0
 
+    /// Which page the strip shows. The pet always lives in the world layout.
+    private var page: LayoutEngine.Page = .world
+    private var controlsLastTouchedAt: Date?
+    /// The controls page slides back to the world after this much idle time.
+    private let controlsIdleTimeout: TimeInterval = 10
+
     private enum MediaChoice: String { case auto, spotify, browser }
     private var mediaChoice: MediaChoice = .auto
 
@@ -50,15 +56,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSLog("[SnappyNest] providers ready")
 
         // Scene
-        let layout = LayoutEngine(bounds: touchBarBounds, backingScale: 2.0)
+        let layout = LayoutEngine(bounds: touchBarBounds, backingScale: 2.0, page: page)
         composer = SceneComposer(layout: layout)
-        pet = PetController(seed: seed, layout: layout)
+        pet = PetController(seed: seed, layout: layout.with(page: .world))
 
         // Renderer + presenter
         renderer = SceneRenderer(frame: touchBarBounds)
-        renderer.onBrightnessChange = { [weak self] v in self?.brightness.set(v) }
-        renderer.onVolumeChange     = { [weak self] v in self?.volume.set(v) }
-        renderer.onTogglePlayPause  = { [weak self] in self?.activeSource().togglePlayPause() }
+        renderer.onBrightnessChange = { [weak self] v in self?.touchedControls(); self?.brightness.set(v) }
+        renderer.onVolumeChange     = { [weak self] v in self?.touchedControls(); self?.volume.set(v) }
+        renderer.onTogglePlayPause  = { [weak self] in self?.touchedControls(); self?.activeSource().togglePlayPause() }
+        renderer.onPageChange       = { [weak self] page in self?.setPage(page) }
         renderer.onPetTap = { [weak self] in
             guard let self else { return }
             self.pet.tapPet(now: self.clock.now)
@@ -150,6 +157,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let now = clock.now
         let media = currentMedia()
         pet.tick(now: now, media: media)
+        if page == .controls, let touched = controlsLastTouchedAt,
+           now.timeIntervalSince(touched) > controlsIdleTimeout {
+            setPage(.world)
+        }
+        renderOnce()
+    }
+
+    private func touchedControls() {
+        controlsLastTouchedAt = clock.now
+    }
+
+    private func setPage(_ newPage: LayoutEngine.Page) {
+        guard newPage != page else { return }
+        page = newPage
+        controlsLastTouchedAt = newPage == .controls ? clock.now : nil
+        composer = SceneComposer(layout: composer.layout.with(page: newPage))
+        NSLog("[SnappyNest] page=%@", newPage == .world ? "world" : "controls")
         renderOnce()
     }
 
@@ -260,27 +284,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard measuredBounds != touchBarBounds ||
               composer.layout.backingScale != geometry.backingScale else { return }
 
-        let oldMiddle = composer.layout.regions.middle
+        let oldMiddle = composer.layout.with(page: .world).regions.middle
         let oldState = pet.state
         let oldFraction = min(1, max(0,
             (oldState.position.x - oldMiddle.minX) / max(1, oldMiddle.width)
         ))
         let layout = LayoutEngine(
             bounds: measuredBounds,
-            backingScale: geometry.backingScale
+            backingScale: geometry.backingScale,
+            page: page
         )
         var resizedState = oldState
         resizedState.position.x = layout.petGroundX(
             fraction: Double(oldFraction),
             spriteHalfWidth: 12
         )
-        resizedState.position.y = layout.regions.middle.maxY - 4
+        resizedState.position.y = layout.with(page: .world).regions.middle.maxY - 4
 
         touchBarBounds = measuredBounds
         composer = SceneComposer(layout: layout)
         pet = PetController(
             seed: seed,
-            layout: layout,
+            layout: layout.with(page: .world),
             initial: resizedState
         )
         NSLog(

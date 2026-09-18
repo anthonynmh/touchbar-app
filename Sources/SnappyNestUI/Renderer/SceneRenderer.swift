@@ -11,8 +11,12 @@ import SnappyNestCore
 /// `update(model:)` on the main thread each tick.
 public final class SceneRenderer: NSView {
 
-    // Layers, back to front.
+    // Layers, back to front. The sky is fixed; the world and the controls
+    // page each live in a full-width container that slides horizontally when
+    // the page changes.
     private let skyLayer = CALayer()
+    private let worldContainer = CALayer()
+    private let terrainLayer = CALayer()
     private let celestialLayer = CALayer()
     private let sceneryContainer = CALayer()
     private let progressTrailLayer = CAShapeLayer()
@@ -20,6 +24,8 @@ public final class SceneRenderer: NSView {
     private let clockPillLayer = CALayer()
     private let clockTextLayer = CATextLayer()
 
+    private let controlsContainer = CALayer()
+    private let controlsPanelLayer = CALayer()
     private let batteryGlyphLayer = CALayer()
     private let batteryTextLayer = CATextLayer()
     private let brightnessIconLayer = CALayer()
@@ -34,7 +40,18 @@ public final class SceneRenderer: NSView {
 
     private var backingScale: CGFloat = 2.0
     private var cachedSky: (key: SkyPainter.Key, image: CGImage)?
+    private var cachedTerrain: (key: SkyPainter.Key, image: CGImage)?
     private var currentModel: SceneModel?
+    /// Camera over the two pages: 0 shows the world, `full.width` shows the
+    /// controls. Dragging the scene moves it; releasing snaps to a page.
+    private var cameraOffset: CGFloat = 0
+    private var settledPage: LayoutEngine.Page = .world
+    private var isDraggingCamera = false
+    private var dragStartOffset: CGFloat = 0
+    public static let pageSlideDuration: TimeInterval = 0.28
+    /// Flick speed (points/second) that commits a page change regardless of
+    /// how far the scene was dragged.
+    public static let flickVelocity: CGFloat = 250
 
     // Clock reveal: tapping the sun/moon shows the time briefly.
     private var clockRevealUntil: Date?
@@ -53,6 +70,9 @@ public final class SceneRenderer: NSView {
     public var onTogglePlayPause:  (() -> Void)?
     public var onPetTap:           (() -> Void)?
     public var onGroundTap:        ((CGFloat) -> Void)?
+    /// The scene was dragged and settled on a page; the owner should compose
+    /// with that `LayoutEngine.Page` from now on.
+    public var onPageChange:       ((LayoutEngine.Page) -> Void)?
 
     public override var isFlipped: Bool { true }
 
@@ -70,12 +90,14 @@ public final class SceneRenderer: NSView {
         backingScale = window?.backingScaleFactor ?? 2.0
         applyContentsScale(to: layer)
         cachedSky = nil
+        cachedTerrain = nil
         if let m = currentModel { update(model: m) }
     }
 
     public override func layout() {
         super.layout()
         cachedSky = nil
+        cachedTerrain = nil
         if let m = currentModel { update(model: m) }
     }
 
@@ -91,21 +113,30 @@ public final class SceneRenderer: NSView {
         layer?.masksToBounds = true
         layer?.contentsScale = backingScale
 
-        let ordered: [CALayer] = [
-            skyLayer, celestialLayer, sceneryContainer, progressTrailLayer, petLayer,
-            clockPillLayer,
-            batteryGlyphLayer, batteryTextLayer,
+        let worldLayers: [CALayer] = [
+            terrainLayer, celestialLayer, sceneryContainer, progressTrailLayer, petLayer,
+            clockPillLayer
+        ]
+        let controlLayers: [CALayer] = [
+            controlsPanelLayer,
             brightnessIconLayer, brightnessTrackLayer, brightnessFillLayer, brightnessKnob,
             volumeIconLayer, volumeTrackLayer, volumeFillLayer, volumeKnob,
-            playPauseLayer
+            playPauseLayer, batteryGlyphLayer, batteryTextLayer
         ]
-        for l in ordered {
+        for l in [skyLayer, worldContainer, controlsContainer] + worldLayers + controlLayers {
             l.contentsScale = backingScale
             l.magnificationFilter = .nearest
             l.minificationFilter = .nearest
             l.isOpaque = false
-            layer?.addSublayer(l)
         }
+        layer?.addSublayer(skyLayer)
+        layer?.addSublayer(worldContainer)
+        layer?.addSublayer(controlsContainer)
+        worldLayers.forEach { worldContainer.addSublayer($0) }
+        controlLayers.forEach { controlsContainer.addSublayer($0) }
+        for c in [worldContainer, controlsContainer] { c.anchorPoint = .zero }
+        controlsPanelLayer.backgroundColor = Palette.controlBg
+
         clockPillLayer.addSublayer(clockTextLayer)
         clockPillLayer.isHidden = true
 
@@ -168,19 +199,104 @@ public final class SceneRenderer: NSView {
 
     public func update(model: SceneModel) {
         currentModel = model
+        let full = model.layout.full
+        let world = LayoutEngine(bounds: full, backingScale: backingScale, page: .world).regions
+        let controls = LayoutEngine(bounds: full, backingScale: backingScale, page: .controls).regions
+
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        paintSky(regions: model.layout, time: model.time)
+        paintSky(regions: world, time: model.time)
+        paintTerrain(regions: world, time: model.time)
         paintCelestial(pos: model.celestial)
-        paintScenery(model.props, regions: model.layout)
-        paintProgressTrail(regions: model.layout, fraction: model.progressFraction)
-        paintPet(state: model.pet, regions: model.layout)
-        paintClock(model: model)
-        paintBattery(model.battery, regions: model.layout)
-        paintBrightness(value: model.brightness, available: model.brightnessAvailable, regions: model.layout)
-        paintVolume(value: model.volume, muted: model.volumeMuted, available: model.volumeAvailable, regions: model.layout)
-        paintPlayPause(media: model.media, regions: model.layout)
+        paintScenery(model.props, regions: world)
+        paintProgressTrail(regions: world, fraction: model.progressFraction)
+        paintPet(state: model.pet, regions: world)
+        paintClock(model: model, regions: world)
+        controlsPanelLayer.frame = controls.full
+        paintBattery(model.battery, regions: controls)
+        paintBrightness(value: model.brightness, available: model.brightnessAvailable, regions: controls)
+        paintVolume(value: model.volume, muted: model.volumeMuted, available: model.volumeAvailable, regions: controls)
+        paintPlayPause(media: model.media, regions: controls)
+        syncCamera(to: model.layout.page, full: full)
         CATransaction.commit()
+    }
+
+    // MARK: - Camera / pages
+
+    /// True once the camera has settled on the controls page.
+    var isShowingControls: Bool { settledPage == .controls }
+
+    /// Called from `update(model:)`: follow the owner's page unless the user
+    /// is mid-drag, so an idle timeout or an external change pans the scene.
+    private func syncCamera(to page: LayoutEngine.Page, full: CGRect) {
+        worldContainer.bounds = full
+        controlsContainer.bounds = full
+        if isDraggingCamera { return }
+        if page != settledPage {
+            settledPage = page
+            animateCamera(to: page == .world ? 0 : full.width, width: full.width)
+        } else if worldContainer.animation(forKey: "pageSlide") == nil {
+            cameraOffset = page == .world ? 0 : full.width
+            positionContainers(offset: cameraOffset, width: full.width)
+        }
+    }
+
+    private func positionContainers(offset: CGFloat, width: CGFloat) {
+        worldContainer.position = CGPoint(x: -offset, y: 0)
+        controlsContainer.position = CGPoint(x: width - offset, y: 0)
+    }
+
+    private func animateCamera(to target: CGFloat, width: CGFloat) {
+        let from = cameraOffset
+        cameraOffset = target
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        positionContainers(offset: target, width: width)
+        for (container, fromX) in [(worldContainer, -from), (controlsContainer, width - from)] {
+            let slide = CABasicAnimation(keyPath: "position")
+            slide.fromValue = NSValue(point: CGPoint(x: fromX, y: 0))
+            slide.toValue = NSValue(point: container.position)
+            slide.duration = Self.pageSlideDuration
+            slide.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            container.add(slide, forKey: "pageSlide")
+        }
+        CATransaction.commit()
+    }
+
+    /// Drive the camera from a horizontal drag. `translation` is the finger's
+    /// movement since the drag began; a positive value pulls the world back
+    /// into view.
+    func beginCameraDrag() {
+        isDraggingCamera = true
+        dragStartOffset = cameraOffset
+        worldContainer.removeAnimation(forKey: "pageSlide")
+        controlsContainer.removeAnimation(forKey: "pageSlide")
+    }
+
+    func moveCameraDrag(translationX: CGFloat) {
+        guard isDraggingCamera, let width = currentModel?.layout.full.width else { return }
+        cameraOffset = min(width, max(0, dragStartOffset - translationX))
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        positionContainers(offset: cameraOffset, width: width)
+        CATransaction.commit()
+    }
+
+    func endCameraDrag(velocityX: CGFloat) {
+        guard isDraggingCamera, let width = currentModel?.layout.full.width else { return }
+        isDraggingCamera = false
+        let page: LayoutEngine.Page
+        if velocityX < -Self.flickVelocity {
+            page = .controls
+        } else if velocityX > Self.flickVelocity {
+            page = .world
+        } else {
+            page = cameraOffset < width / 2 ? .world : .controls
+        }
+        let changed = page != settledPage
+        settledPage = page
+        animateCamera(to: page == .world ? 0 : width, width: width)
+        if changed { onPageChange?(page) }
     }
 
     // MARK: - Sky
@@ -190,9 +306,19 @@ public final class SceneRenderer: NSView {
         skyLayer.magnificationFilter = .linear
         let key = SkyPainter.Key(time: time, size: regions.full.size, scale: backingScale)
         if cachedSky?.key != key {
-            cachedSky = (key, SkyPainter.image(regions: regions, time: time, scale: backingScale))
+            cachedSky = (key, SkyPainter.sky(size: regions.full.size, time: time, scale: backingScale))
         }
         skyLayer.contents = cachedSky?.image
+    }
+
+    private func paintTerrain(regions: LayoutEngine.Regions, time: WorldTime) {
+        terrainLayer.frame = regions.middle
+        terrainLayer.magnificationFilter = .linear
+        let key = SkyPainter.Key(time: time, size: regions.middle.size, scale: backingScale)
+        if cachedTerrain?.key != key {
+            cachedTerrain = (key, SkyPainter.terrain(size: regions.middle.size, time: time, scale: backingScale))
+        }
+        terrainLayer.contents = cachedTerrain?.image
     }
 
     // MARK: - Celestial
@@ -280,7 +406,7 @@ public final class SceneRenderer: NSView {
     /// True while the tapped-sun/moon clock pill is showing.
     var isClockRevealed: Bool { !clockPillLayer.isHidden }
 
-    private func paintClock(model: SceneModel) {
+    private func paintClock(model: SceneModel, regions: LayoutEngine.Regions) {
         guard let until = clockRevealUntil, now() < until else {
             clockRevealUntil = nil
             clockPillLayer.isHidden = true
@@ -293,7 +419,7 @@ public final class SceneRenderer: NSView {
         ]).width
         let pillSize = CGSize(width: (textWidth + 12).rounded(), height: 16)
         let body = celestialRect(model.celestial)
-        let middle = model.layout.middle
+        let middle = regions.middle
         // Beside the body on whichever side has room, vertically centered on it.
         var x = body.maxX + 3
         if x + pillSize.width > middle.maxX - 2 { x = body.minX - 3 - pillSize.width }
@@ -412,37 +538,51 @@ public final class SceneRenderer: NSView {
         handleTap(at: recognizer.location(in: self))
     }
 
+    private var panIsSlider = false
+
     @objc private func handlePan(_ recognizer: NSPanGestureRecognizer) {
-        guard recognizer.state == .began || recognizer.state == .changed else { return }
-        handleDrag(at: recognizer.location(in: self))
+        let point = recognizer.location(in: self)
+        switch recognizer.state {
+        case .began:
+            panIsSlider = isSliderPoint(point)
+            if panIsSlider { handleDrag(at: point) } else { beginCameraDrag() }
+        case .changed:
+            if panIsSlider { handleDrag(at: point) }
+            else { moveCameraDrag(translationX: recognizer.translation(in: self).x) }
+        case .ended, .cancelled, .failed:
+            if !panIsSlider { endCameraDrag(velocityX: recognizer.velocity(in: self).x) }
+        default:
+            break
+        }
+    }
+
+    /// A drag that starts on a live slider scrubs it; anywhere else pans the scene.
+    func isSliderPoint(_ point: CGPoint) -> Bool {
+        guard let model = currentModel else { return false }
+        return (model.layout.brightness.contains(point) && model.brightnessAvailable)
+            || (model.layout.volume.contains(point) && model.volumeAvailable)
     }
 
     func handleTap(at point: CGPoint) {
         guard let model = currentModel else { return }
-        if model.layout.playPause.contains(point) && model.media.canPlayPause {
-            onTogglePlayPause?()
-            return
-        }
-        if model.layout.brightness.contains(point) && model.brightnessAvailable {
-            let f = fraction(x: point.x, in: trackRect(model.layout.brightness))
-            onBrightnessChange?(f)
-            return
-        }
-        if model.layout.volume.contains(point) && model.volumeAvailable {
-            let f = fraction(x: point.x, in: trackRect(model.layout.volume))
-            onVolumeChange?(f)
-            return
-        }
-        if celestialRect(model.celestial).insetBy(dx: -Self.tapSlop, dy: -Self.tapSlop).contains(point) {
-            revealClock()
-            return
-        }
-        if model.pet.hitRect(spriteSize: PetSprites.cellSize).insetBy(dx: -Self.tapSlop, dy: -Self.tapSlop).contains(point) {
-            onPetTap?()
-            return
-        }
-        if model.layout.middle.contains(point) {
-            onGroundTap?(point.x)
+        let regions = model.layout
+        switch regions.page {
+        case .controls:
+            if regions.playPause.contains(point) && model.media.canPlayPause {
+                onTogglePlayPause?()
+            } else if regions.brightness.contains(point) && model.brightnessAvailable {
+                onBrightnessChange?(fraction(x: point.x, in: trackRect(regions.brightness)))
+            } else if regions.volume.contains(point) && model.volumeAvailable {
+                onVolumeChange?(fraction(x: point.x, in: trackRect(regions.volume)))
+            }
+        case .world:
+            if celestialRect(model.celestial).insetBy(dx: -Self.tapSlop, dy: -Self.tapSlop).contains(point) {
+                revealClock()
+            } else if model.pet.hitRect(spriteSize: PetSprites.cellSize).insetBy(dx: -Self.tapSlop, dy: -Self.tapSlop).contains(point) {
+                onPetTap?()
+            } else if regions.middle.contains(point) {
+                onGroundTap?(point.x)
+            }
         }
     }
 

@@ -114,6 +114,22 @@ final class SceneSnapshotTests: XCTestCase {
             let image = try snapshot(renderer)
             try write(image, to: dir.appendingPathComponent(String(format: "scene-%02d%02d.png", hour, minute)))
         }
+
+        // The controls page at noon and at night.
+        for hour in [12, 22] {
+            var comps = DateComponents(); comps.year = 2026; comps.month = 6; comps.day = 21; comps.hour = hour
+            let now = cal.date(from: comps)!
+            let controls = SceneComposer(layout: layout.with(page: .controls))
+            let model = controls.compose(
+                now: now, calendar: cal, pet: .placeholder,
+                battery: BatterySnapshot(isPresent: true, percentage: 0.64, isCharging: hour == 22),
+                brightness: (0.6, true), volume: (0.35, false, true),
+                media: MediaSnapshot(identity: "spotify", state: .playing, elapsed: 40, duration: 120,
+                                     elapsedAt: now, rate: 1, canPlayPause: true, canReadPosition: true, canReadDuration: true)
+            )
+            renderer.update(model: model)
+            try write(try snapshot(renderer), to: dir.appendingPathComponent(String(format: "controls-%02d00.png", hour)))
+        }
     }
 
     private func snapshot(_ view: NSView) throws -> CGImage {

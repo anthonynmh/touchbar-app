@@ -74,9 +74,12 @@ final class SpriteRenderTests: XCTestCase {
     func testSkyImageMatchesBoundsAndKeyChangesPerMinute() {
         let regions = LayoutEngine(bounds: CGRect(x: 0, y: 0, width: 1004, height: 30), backingScale: scale).regions
         let noon = WorldTime(hour: 12, minute: 0, second: 0)
-        let img = SkyPainter.image(regions: regions, time: noon, scale: scale)
+        let img = SkyPainter.sky(size: regions.full.size, time: noon, scale: scale)
         XCTAssertEqual(img.width, 2008)
         XCTAssertEqual(img.height, 60)
+        let terrain = SkyPainter.terrain(size: regions.middle.size, time: noon, scale: scale)
+        XCTAssertEqual(CGFloat(terrain.width), regions.middle.width * scale)
+        XCTAssertTrue(isNonEmpty(terrain))
         let k1 = SkyPainter.Key(time: noon, size: regions.full.size, scale: scale)
         let k2 = SkyPainter.Key(time: WorldTime(hour: 12, minute: 0, second: 30), size: regions.full.size, scale: scale)
         let k3 = SkyPainter.Key(time: WorldTime(hour: 12, minute: 1, second: 0), size: regions.full.size, scale: scale)

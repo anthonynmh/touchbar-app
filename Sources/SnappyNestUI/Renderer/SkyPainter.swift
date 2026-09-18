@@ -3,11 +3,11 @@ import CoreGraphics
 import SnappyNestCore
 
 /// Paints the live environment for a given wall-clock time: a vertical sky
-/// gradient keyed by hour, stars that fade with daylight, a warm horizon glow
-/// at dawn/dusk, two hill silhouettes and a grassy ground across the middle
-/// region, and translucent panels behind the battery and control regions.
+/// gradient keyed by hour with stars that fade with daylight and a warm
+/// horizon glow at dawn/dusk (`sky`), plus hill silhouettes and grassy ground
+/// for the world's middle region (`terrain`).
 ///
-/// The result changes at most once per minute, so the renderer caches it by
+/// Both change at most once per minute, so the renderer caches them by
 /// `SkyPainter.Key`.
 public enum SkyPainter {
     public struct Key: Hashable {
@@ -71,79 +71,73 @@ public enum SkyPainter {
     /// Top of the ground band in points; the pet's feet sit at `maxY - 4`.
     public static let groundY: CGFloat = 23
 
-    public static func image(regions: LayoutEngine.Regions, time: WorldTime, scale: CGFloat) -> CGImage {
-        let size = regions.full.size
-        return PetSprites.render(size: size, scale: scale) { ctx in
+    /// Sky backdrop for the full strip: gradient, stars, and twilight glow.
+    public static func sky(size: CGSize, time: WorldTime, scale: CGFloat) -> CGImage {
+        PetSprites.render(size: size, scale: scale) { ctx in
             ctx.setShouldAntialias(true)
-            paint(ctx: ctx, regions: regions, time: time)
+            let full = CGRect(origin: .zero, size: size)
+            let (zenith, horizon) = skyColors(at: time)
+            let daylight = time.daylight
+            let twilight = time.twilight
+
+            drawVerticalGradient(ctx, in: full, top: zenith.cg(), bottom: horizon.cg())
+
+            // Stars, fading with daylight. Seeded so they never jitter.
+            if daylight < 0.98 {
+                var rng = SeededRandom(seed: 0x5EED_5747)
+                let starAlpha = 1 - daylight
+                for i in 0..<70 {
+                    let x = CGFloat(rng.nextDouble()) * full.width
+                    let y = CGFloat(rng.nextDouble()) * (horizonY - 2)
+                    let twinkle = (i + time.minute) % 7 == 0 ? 0.35 : 1.0
+                    let bright = rng.nextDouble() < 0.25
+                    ctx.setFillColor(CGColor(gray: 1, alpha: CGFloat(starAlpha * twinkle * (bright ? 0.95 : 0.55))))
+                    let s: CGFloat = bright ? 1.5 : 1
+                    ctx.fill(CGRect(x: x, y: y, width: s, height: s))
+                }
+            }
+
+            // Warm glow hugging the horizon at dawn/dusk.
+            if twilight > 0.01 {
+                let glow = RGB(0xFFB15E)
+                drawVerticalGradient(ctx, in: CGRect(x: 0, y: horizonY - 9, width: full.width, height: 10),
+                                     top: glow.cg(alpha: 0), bottom: glow.cg(alpha: 0.55 * twilight))
+            }
         }
     }
 
-    private static func paint(ctx: CGContext, regions: LayoutEngine.Regions, time: WorldTime) {
-        let full = regions.full
-        let (zenith, horizon) = skyColors(at: time)
-        let daylight = time.daylight
-        let twilight = time.twilight
+    /// Hills and grass for the world's middle region, drawn at the origin of
+    /// a bitmap `size` wide (the layer is placed at the region's frame).
+    public static func terrain(size: CGSize, time: WorldTime, scale: CGFloat) -> CGImage {
+        PetSprites.render(size: size, scale: scale) { ctx in
+            ctx.setShouldAntialias(true)
+            let m = CGRect(origin: .zero, size: size)
+            let (_, horizon) = skyColors(at: time)
+            let night = 1 - time.daylight
 
-        // Sky gradient, full width.
-        drawVerticalGradient(ctx, in: full, top: zenith.cg(), bottom: horizon.cg())
+            let farHill = horizon.mix(RGB(0x2F6B3A), 0.45).scaled(0.75 - 0.35 * night)
+            let nearHill = horizon.mix(RGB(0x2A5A32), 0.6).scaled(0.6 - 0.3 * night)
+            drawHills(ctx, in: m, baseY: groundY + 2, crest: horizonY, amplitude: 3.5, frequency: 0.045, phase: 0.8, color: farHill.cg())
+            drawHills(ctx, in: m, baseY: groundY + 2, crest: horizonY + 3, amplitude: 2.5, frequency: 0.08, phase: 2.9, color: nearHill.cg())
 
-        // Stars, fading with daylight. Seeded so they never jitter.
-        if daylight < 0.98 {
-            var rng = SeededRandom(seed: 0x5EED_5747)
-            let starAlpha = 1 - daylight
-            for i in 0..<70 {
-                let x = CGFloat(rng.nextDouble()) * full.width
-                let y = CGFloat(rng.nextDouble()) * (horizonY - 2)
-                let twinkle = (i + time.minute) % 7 == 0 ? 0.35 : 1.0
-                let bright = rng.nextDouble() < 0.25
-                ctx.setFillColor(CGColor(gray: 1, alpha: CGFloat(starAlpha * twinkle * (bright ? 0.95 : 0.55))))
-                let s: CGFloat = bright ? 1.5 : 1
-                ctx.fill(CGRect(x: x, y: y, width: s, height: s))
+            // Ground: grass gradient with a darker soil line at the bottom.
+            let grassTop = RGB(0x5E9C43).mix(RGB(0x1F3526), night)
+            let grassBottom = RGB(0x3D6E2F).mix(RGB(0x152419), night)
+            let ground = CGRect(x: 0, y: groundY, width: m.width, height: m.maxY - groundY)
+            drawVerticalGradient(ctx, in: ground, top: grassTop.cg(), bottom: grassBottom.cg())
+            ctx.setFillColor(RGB(0x3B2A1C).mix(RGB(0x120D08), night).cg())
+            ctx.fill(CGRect(x: 0, y: m.maxY - 2, width: m.width, height: 2))
+
+            // Grass tufts, seeded.
+            var tufts = SeededRandom(seed: 0x6A55)
+            ctx.setFillColor(grassTop.scaled(1.25).cg())
+            for _ in 0..<Int(m.width / 14) {
+                let x = CGFloat(tufts.nextDouble()) * m.width
+                let h: CGFloat = 1 + CGFloat(tufts.nextInt(in: 0..<2))
+                ctx.fill(CGRect(x: x, y: groundY - h, width: 1, height: h + 1))
+                ctx.fill(CGRect(x: x + 2, y: groundY - h + 1, width: 1, height: h))
             }
         }
-
-        // Warm glow hugging the horizon at dawn/dusk.
-        if twilight > 0.01 {
-            let glow = RGB(0xFFB15E)
-            drawVerticalGradient(ctx, in: CGRect(x: full.minX, y: horizonY - 9, width: full.width, height: 10),
-                                 top: glow.cg(alpha: 0), bottom: glow.cg(alpha: 0.55 * twilight))
-        }
-
-        // Hills and ground live inside the middle region only.
-        let m = regions.middle
-        let night = 1 - daylight
-        let farHill = horizon.mix(RGB(0x2F6B3A), 0.45).scaled(0.75 - 0.35 * night)
-        let nearHill = horizon.mix(RGB(0x2A5A32), 0.6).scaled(0.6 - 0.3 * night)
-        drawHills(ctx, in: m, baseY: groundY + 2, crest: horizonY, amplitude: 3.5, frequency: 0.045, phase: 0.8, color: farHill.cg())
-        drawHills(ctx, in: m, baseY: groundY + 2, crest: horizonY + 3, amplitude: 2.5, frequency: 0.08, phase: 2.9, color: nearHill.cg())
-
-        // Ground: grass gradient with a darker soil line at the bottom.
-        let grassTop = RGB(0x5E9C43).mix(RGB(0x1F3526), night)
-        let grassBottom = RGB(0x3D6E2F).mix(RGB(0x152419), night)
-        let ground = CGRect(x: m.minX, y: groundY, width: m.width, height: full.maxY - groundY)
-        drawVerticalGradient(ctx, in: ground, top: grassTop.cg(), bottom: grassBottom.cg())
-        ctx.setFillColor(RGB(0x3B2A1C).mix(RGB(0x120D08), night).cg())
-        ctx.fill(CGRect(x: m.minX, y: full.maxY - 2, width: m.width, height: 2))
-
-        // Grass tufts, seeded.
-        var tufts = SeededRandom(seed: 0x6A55)
-        ctx.setFillColor(grassTop.scaled(1.25).cg())
-        for _ in 0..<Int(m.width / 14) {
-            let x = m.minX + CGFloat(tufts.nextDouble()) * m.width
-            let h: CGFloat = 1 + CGFloat(tufts.nextInt(in: 0..<2))
-            ctx.fill(CGRect(x: x, y: groundY - h, width: 1, height: h + 1))
-            ctx.fill(CGRect(x: x + 2, y: groundY - h + 1, width: 1, height: h))
-        }
-
-        // Translucent panels behind the battery and the controls so they read
-        // as UI over the scene.
-        ctx.setFillColor(Palette.controlBg)
-        ctx.fill(regions.battery)
-        ctx.fill(regions.right)
-        ctx.setFillColor(CGColor(gray: 1, alpha: 0.10))
-        ctx.fill(CGRect(x: regions.battery.maxX - 1, y: full.minY, width: 1, height: full.height))
-        ctx.fill(CGRect(x: regions.right.minX, y: full.minY, width: 1, height: full.height))
     }
 
     private static func drawVerticalGradient(_ ctx: CGContext, in rect: CGRect, top: CGColor, bottom: CGColor) {

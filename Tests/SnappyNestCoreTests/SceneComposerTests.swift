@@ -39,7 +39,7 @@ final class SceneComposerTests: XCTestCase {
         XCTAssertNil(model.progressFraction)
     }
 
-    func testMoonStaysClearOfBatteryAndControlsAllNight() {
+    func testMoonStaysInsideTheWorldAllNight() {
         let layout = LayoutEngine(bounds: bounds, backingScale: 2.0)
         let composer = SceneComposer(layout: layout)
         var components = DateComponents()
@@ -75,8 +75,8 @@ final class SceneComposerTests: XCTestCase {
                 volume: (0.4, false, true),
                 media: .unknown
             )
-            XCTAssertGreaterThanOrEqual(m.celestial.point.x - halfWidth, m.layout.battery.maxX - 1e-6)
-            XCTAssertLessThanOrEqual(m.celestial.point.x + halfWidth, m.layout.right.minX + 1e-6)
+            XCTAssertGreaterThanOrEqual(m.celestial.point.x - halfWidth, m.layout.middle.minX - 1e-6)
+            XCTAssertLessThanOrEqual(m.celestial.point.x + halfWidth, m.layout.middle.maxX + 1e-6)
         }
     }
 

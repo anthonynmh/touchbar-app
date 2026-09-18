@@ -22,7 +22,7 @@ final class SceneRendererInteractionTests: XCTestCase {
 
     func testTapRoutesToBrightnessVolumeAndPlayPause() {
         let renderer = makeRenderer()
-        let model = makeModel()
+        let model = makeModel(page: .controls)
         renderer.update(model: model)
 
         var brightness: Double?
@@ -43,7 +43,7 @@ final class SceneRendererInteractionTests: XCTestCase {
 
     func testPanClampsControlValues() {
         let renderer = makeRenderer()
-        let model = makeModel()
+        let model = makeModel(page: .controls)
         renderer.update(model: model)
 
         var brightness: Double?
@@ -92,54 +92,112 @@ final class SceneRendererInteractionTests: XCTestCase {
         XCTAssertEqual(groundX ?? -1, x, accuracy: 1e-6)
     }
 
-    func testTapOutsideMiddleDoesNotCallGroundTap() {
+    func testControlsPageNeverRoutesToPetOrGround() {
         let renderer = makeRenderer()
-        var model = makeModel()
-        model = makeModel(brightnessAvailable: false)
+        let model = makeModel(page: .controls, brightnessAvailable: false)
         renderer.update(model: model)
         var groundX: CGFloat?
+        var petTaps = 0
         renderer.onGroundTap = { groundX = $0 }
+        renderer.onPetTap = { petTaps += 1 }
         renderer.handleTap(at: CGPoint(x: model.layout.brightness.midX, y: 15))
         renderer.handleTap(at: CGPoint(x: model.layout.battery.midX, y: 15))
+        let pet = model.pet.hitRect(spriteSize: PetSprites.cellSize)
+        renderer.handleTap(at: CGPoint(x: pet.midX, y: pet.midY))
         XCTAssertNil(groundX)
+        XCTAssertEqual(petTaps, 0)
     }
 
-    func testTapOnSunRevealsClockThenHidesIt() {
+    func testWorldPageIgnoresControlDragsAndTaps() {
         let renderer = makeRenderer()
-        let model = makeModel()
-        var clock = Date(timeIntervalSince1970: 1_700_000_000)
-        renderer.now = { clock }
+        let model = makeModel(page: .world)
         renderer.update(model: model)
-        var petTaps = 0
-        var groundX: CGFloat?
-        renderer.onPetTap = { petTaps += 1 }
-        renderer.onGroundTap = { groundX = $0 }
-        XCTAssertFalse(renderer.isClockRevealed)
+        var brightness: Double?
+        renderer.onBrightnessChange = { brightness = $0 }
+        // Where the brightness slider would be on the controls page.
+        let controls = LayoutEngine(bounds: bounds, backingScale: 2, page: .controls).regions
+        renderer.handleDrag(at: CGPoint(x: controls.brightness.midX, y: 15))
+        XCTAssertNil(brightness)
+    }
 
-        renderer.handleTap(at: model.celestial.point)
-        XCTAssertTrue(renderer.isClockRevealed)
-        XCTAssertEqual(petTaps, 0)
-        XCTAssertNil(groundX)
+    func testDraggingTheSceneSnapsToTheNearerPage() {
+        let renderer = makeRenderer()
+        var pages: [LayoutEngine.Page] = []
+        renderer.onPageChange = { pages.append($0) }
+        renderer.update(model: makeModel(page: .world))
 
-        clock = clock.addingTimeInterval(SceneRenderer.clockRevealDuration - 0.5)
-        renderer.update(model: model)
-        XCTAssertTrue(renderer.isClockRevealed)
+        // A short drag left snaps back to the world.
+        renderer.beginCameraDrag()
+        renderer.moveCameraDrag(translationX: -100)
+        renderer.endCameraDrag(velocityX: 0)
+        XCTAssertFalse(renderer.isShowingControls)
+        XCTAssertEqual(pages, [])
 
-        clock = clock.addingTimeInterval(1)
-        renderer.update(model: model)
-        XCTAssertFalse(renderer.isClockRevealed)
+        // Dragging past halfway commits to the controls page.
+        renderer.beginCameraDrag()
+        renderer.moveCameraDrag(translationX: -(bounds.width / 2 + 10))
+        renderer.endCameraDrag(velocityX: 0)
+        XCTAssertTrue(renderer.isShowingControls)
+        XCTAssertEqual(pages, [.controls])
+    }
+
+    func testFlickCommitsRegardlessOfDistance() {
+        let renderer = makeRenderer()
+        var pages: [LayoutEngine.Page] = []
+        renderer.onPageChange = { pages.append($0) }
+        renderer.update(model: makeModel(page: .world))
+
+        renderer.beginCameraDrag()
+        renderer.moveCameraDrag(translationX: -20)
+        renderer.endCameraDrag(velocityX: -(SceneRenderer.flickVelocity + 1))
+        XCTAssertTrue(renderer.isShowingControls)
+
+        renderer.update(model: makeModel(page: .controls))
+        renderer.beginCameraDrag()
+        renderer.moveCameraDrag(translationX: 20)
+        renderer.endCameraDrag(velocityX: SceneRenderer.flickVelocity + 1)
+        XCTAssertFalse(renderer.isShowingControls)
+        XCTAssertEqual(pages, [.controls, .world])
+    }
+
+    func testOwnerPageChangePansTheCamera() {
+        let renderer = makeRenderer()
+        renderer.update(model: makeModel(page: .world))
+        XCTAssertFalse(renderer.isShowingControls)
+        renderer.update(model: makeModel(page: .controls))
+        XCTAssertTrue(renderer.isShowingControls)
+        XCTAssertNotNil(renderer.layer?.sublayers?.compactMap { $0.animation(forKey: "pageSlide") }.first,
+                        "an owner-driven page change should slide, not jump")
+        renderer.update(model: makeModel(page: .world))
+        XCTAssertFalse(renderer.isShowingControls)
+    }
+
+    func testDragStartingOnASliderScrubsInsteadOfPanning() {
+        let renderer = makeRenderer()
+        let controls = makeModel(page: .controls)
+        renderer.update(model: controls)
+        XCTAssertTrue(renderer.isSliderPoint(CGPoint(x: controls.layout.brightness.midX, y: 15)))
+        XCTAssertTrue(renderer.isSliderPoint(CGPoint(x: controls.layout.volume.midX, y: 15)))
+        XCTAssertFalse(renderer.isSliderPoint(CGPoint(x: controls.layout.battery.midX, y: 15)))
+        XCTAssertFalse(renderer.isSliderPoint(CGPoint(x: controls.layout.playPause.midX, y: 15)))
+
+        let world = makeModel(page: .world)
+        renderer.update(model: world)
+        XCTAssertFalse(renderer.isSliderPoint(CGPoint(x: controls.layout.brightness.midX, y: 15)),
+                       "on the world page the same spot is scenery, so a drag pans")
     }
 
     private func makeRenderer() -> SceneRenderer {
         SceneRenderer(frame: bounds)
     }
 
-    private func makeModel(brightnessAvailable: Bool = true) -> SceneModel {
-        let engine = LayoutEngine(bounds: bounds, backingScale: 2)
+    private func makeModel(page: LayoutEngine.Page = .world, brightnessAvailable: Bool = true) -> SceneModel {
+        let engine = LayoutEngine(bounds: bounds, backingScale: 2, page: page)
         let layout = engine.regions
+        let world = engine.with(page: .world).regions
         let time = WorldTime(hour: 12, minute: 0, second: 0)
         let pet = PetState(action: .idle, facing: .right,
-                           position: CGPoint(x: layout.middle.minX + 80, y: layout.middle.maxY - 4),
+                           position: CGPoint(x: world.middle.minX + 80, y: world.middle.maxY - 4),
                            frameIndex: 0)
         let media = MediaSnapshot(
             identity: "test",
@@ -157,7 +215,7 @@ final class SceneRendererInteractionTests: XCTestCase {
             celestial: CelestialSolver.position(
                 for: time,
                 sceneSize: bounds.size,
-                horizontalRange: (layout.middle.minX + 8)...(layout.middle.maxX - 8)
+                horizontalRange: (world.middle.minX + 8)...(world.middle.maxX - 8)
             ),
             layout: layout,
             props: [],

@@ -7,40 +7,54 @@ import Foundation
 /// top-left. All widths and heights are in points; the renderer separately
 /// applies `contentsScale = backingScaleFactor` for pixel alignment.
 ///
-/// Region shares are the initial allocation from the plan; percentages are
-/// resolved at runtime against the measured bounds so they scale with any
-/// future Touch Bar geometry.
+/// The strip is a camera over two *pages* laid side by side: the world and,
+/// to its right, the controls (sliders, play/pause, battery). Dragging the
+/// scene horizontally pans between them. Each page uses the full strip;
+/// regions that do not exist on the current page are `CGRect.null`, which
+/// contains no point.
 public struct LayoutEngine: Equatable {
+    public enum Page: Equatable, CaseIterable {
+        case world
+        case controls
+    }
+
     public struct Regions: Equatable {
+        public let page: Page
         public let full: CGRect
-        public let sky: CGRect          // full width; time-of-day panorama
-        public let battery: CGRect      // left 9 %
-        public let middle: CGRect       // 9 % .. 67 % — pet accessible ground
-        public let right: CGRect        // 67 % .. 100 % — controls
+        public let sky: CGRect          // full width; time-of-day sky
+        public let middle: CGRect       // world page: pet-accessible ground
+        public let right: CGRect        // controls page: the whole strip
         public let brightness: CGRect
         public let volume: CGRect
         public let playPause: CGRect
+        public let battery: CGRect      // rightmost control
     }
 
-    public static let batteryShare: CGFloat    = 0.09
-    public static let middleShare: CGFloat     = 0.58
-    /// Right region split: brightness 40 % / volume 40 % / play-pause 20 %.
-    public static let brightnessShareOfRight: CGFloat = 0.40
-    public static let volumeShareOfRight: CGFloat     = 0.40
-    public static let playPauseShareOfRight: CGFloat  = 0.20
-
+    /// Horizontal padding at both ends of the controls page.
+    public static let controlsInset: CGFloat = 10
+    /// Battery cell: glyph + percentage label.
+    public static let batteryShareOfRight: CGFloat = 0.10
+    public static let minimumBatteryWidth: CGFloat = 72
+    public static let playPauseShareOfRight: CGFloat = 0.06
     /// Minimum touch-target width in points. Regions never shrink below this,
     /// even if the strip is measured smaller than expected.
     public static let minimumControlWidth: CGFloat = 30
 
     public let bounds: CGRect
     public let backingScale: CGFloat
+    public let page: Page
 
-    public init(bounds: CGRect, backingScale: CGFloat) {
+    public init(bounds: CGRect, backingScale: CGFloat, page: Page = .world) {
         precondition(bounds.width > 0 && bounds.height > 0, "bounds must be positive")
         precondition(backingScale > 0, "backingScale must be positive")
         self.bounds = bounds
         self.backingScale = backingScale
+        self.page = page
+    }
+
+    /// The same geometry on another page.
+    public func with(page: Page) -> LayoutEngine {
+        LayoutEngine(bounds: bounds, backingScale: backingScale, page: page)
     }
 
     public var regions: Regions {
@@ -48,34 +62,27 @@ public struct LayoutEngine: Equatable {
         let h = bounds.height
         let x = bounds.minX
         let y = bounds.minY
-
-        let batteryW = max(LayoutEngine.minimumControlWidth, w * LayoutEngine.batteryShare)
-        let rightW   = max(3 * LayoutEngine.minimumControlWidth,
-                           w * (1 - LayoutEngine.batteryShare - LayoutEngine.middleShare))
-        let middleW  = max(0, w - batteryW - rightW)
-
-        let battery = CGRect(x: x, y: y, width: batteryW, height: h)
-        let middle  = CGRect(x: x + batteryW, y: y, width: middleW, height: h)
-        let right   = CGRect(x: x + batteryW + middleW, y: y, width: rightW, height: h)
-
-        let brightnessW = right.width * LayoutEngine.brightnessShareOfRight
-        let volumeW     = right.width * LayoutEngine.volumeShareOfRight
-        let playW       = right.width - brightnessW - volumeW
-
-        let brightness = CGRect(x: right.minX,                       y: y, width: brightnessW, height: h)
-        let volume     = CGRect(x: right.minX + brightnessW,         y: y, width: volumeW,     height: h)
-        let playPause  = CGRect(x: right.minX + brightnessW + volumeW, y: y, width: playW,     height: h)
-
-        return Regions(
-            full: bounds,
-            sky: bounds,
-            battery: battery,
-            middle: middle,
-            right: right,
-            brightness: brightness,
-            volume: volume,
-            playPause: playPause
-        )
+        switch page {
+        case .world:
+            return Regions(
+                page: .world, full: bounds, sky: bounds, middle: bounds,
+                right: .null, brightness: .null, volume: .null, playPause: .null, battery: .null
+            )
+        case .controls:
+            let inset = min(LayoutEngine.controlsInset, w / 10)
+            let right = CGRect(x: x + inset, y: y, width: w - 2 * inset, height: h)
+            let batteryW = min(right.width / 2, max(LayoutEngine.minimumBatteryWidth, right.width * LayoutEngine.batteryShareOfRight))
+            let playW = min(right.width / 4, max(LayoutEngine.minimumControlWidth + 10, right.width * LayoutEngine.playPauseShareOfRight))
+            let sliderW = max(LayoutEngine.minimumControlWidth, (right.width - batteryW - playW) / 2)
+            let brightness = CGRect(x: right.minX, y: y, width: sliderW, height: h)
+            let volume = CGRect(x: brightness.maxX, y: y, width: sliderW, height: h)
+            let playPause = CGRect(x: volume.maxX, y: y, width: playW, height: h)
+            let battery = CGRect(x: playPause.maxX, y: y, width: max(0, right.maxX - playPause.maxX), height: h)
+            return Regions(
+                page: .controls, full: bounds, sky: bounds, middle: .null,
+                right: right, brightness: brightness, volume: volume, playPause: playPause, battery: battery
+            )
+        }
     }
 
     /// Given a fractional position `[0, 1]` along the middle-region ground,
@@ -83,7 +90,7 @@ public struct LayoutEngine: Equatable {
     /// caller passes the pet sprite's half-width as `spriteHalfWidth` so we
     /// inset both ends and the sprite never clips the region edge.
     public func petGroundX(fraction: Double, spriteHalfWidth: CGFloat) -> CGFloat {
-        let m = regions.middle
+        let m = with(page: .world).regions.middle
         let inset = max(spriteHalfWidth, 2)
         let usable = max(0, m.width - 2 * inset)
         let clamped = min(1.0, max(0.0, fraction))
