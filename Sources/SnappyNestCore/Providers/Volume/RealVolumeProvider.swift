@@ -368,8 +368,7 @@ public final class RealVolumeProvider: VolumeProvider {
         if succeeded, validateVolumeTarget(target), let confirmed = readState(device: currentDevice) {
             updateAndNotify(confirmed)
         } else {
-            restore(snapshot)
-            publishActualState()
+            recoverAfterFailedWrite(snapshot)
         }
     }
 
@@ -387,8 +386,7 @@ public final class RealVolumeProvider: VolumeProvider {
         if succeeded, validateMuteTarget(muted), let confirmed = readState(device: currentDevice) {
             updateAndNotify(confirmed)
         } else {
-            restore(snapshot)
-            publishActualState()
+            recoverAfterFailedWrite(snapshot)
         }
     }
 
@@ -431,22 +429,64 @@ public final class RealVolumeProvider: VolumeProvider {
         return true
     }
 
-    private func restore(_ snapshot: StateSnapshot) {
+    private func recoverAfterFailedWrite(_ snapshot: StateSnapshot) {
+        let restored = restore(snapshot)
+        if !restored {
+            capability = .unavailable(reason: "rollback_failed")
+        }
+        if !publishActualState(alwaysNotify: !restored), !restored {
+            notify()
+        }
+    }
+
+    private func restore(_ snapshot: StateSnapshot) -> Bool {
+        var statusesOK = true
         for entry in snapshot.volumes {
-            _ = bridge.setVolume(device: currentDevice, address: entry.address, value: entry.value)
+            if bridge.setVolume(
+                device: currentDevice,
+                address: entry.address,
+                value: entry.value
+            ) != noErr {
+                statusesOK = false
+            }
         }
         for entry in snapshot.mutes where entry.control.settable {
-            _ = bridge.setMute(device: currentDevice, address: entry.control.address, muted: entry.value)
+            if bridge.setMute(
+                device: currentDevice,
+                address: entry.control.address,
+                muted: entry.value
+            ) != noErr {
+                statusesOK = false
+            }
         }
+
+        var readbackOK = true
+        for entry in snapshot.volumes {
+            let result = bridge.getVolume(device: currentDevice, address: entry.address)
+            if result.0 != noErr || !result.1.isFinite
+                || abs(result.1 - entry.value) > 0.01 {
+                readbackOK = false
+            }
+        }
+        for entry in snapshot.mutes {
+            let result = bridge.getMute(device: currentDevice, address: entry.control.address)
+            if result.0 != noErr || result.1 != entry.value { readbackOK = false }
+        }
+        return statusesOK && readbackOK
     }
 
-    private func publishActualState() {
-        guard let state = readState(device: currentDevice) else { return }
-        updateAndNotify(state)
+    @discardableResult
+    private func publishActualState(alwaysNotify: Bool = false) -> Bool {
+        guard let state = readState(device: currentDevice) else { return false }
+        updateAndNotify(state, alwaysNotify: alwaysNotify)
+        return true
     }
 
-    private func updateAndNotify(_ state: (value: Double, muted: Bool)) {
-        guard value != state.value || isMuted != state.muted else { return }
+    private func updateAndNotify(
+        _ state: (value: Double, muted: Bool),
+        alwaysNotify: Bool = false
+    ) {
+        guard alwaysNotify || value != state.value || isMuted != state.muted else { return }
         value = state.value
         isMuted = state.muted
         notify()

@@ -113,6 +113,7 @@ final class RealVolumeProviderTests: XCTestCase {
         XCTAssertEqual(bridge.scalarVolumes[1] ?? -1, 0.2, accuracy: 0.001)
         XCTAssertEqual(bridge.scalarVolumes[2] ?? -1, 0.3, accuracy: 0.001)
         XCTAssertEqual(provider.value, 0.25, accuracy: 0.001)
+        XCTAssertEqual(provider.capability, .supported)
     }
 
     func testFailedChannelWriteRollsBackEveryChangedVolume() {
@@ -126,6 +127,25 @@ final class RealVolumeProviderTests: XCTestCase {
         XCTAssertEqual(bridge.scalarVolumes[1] ?? -1, 0.2, accuracy: 0.001)
         XCTAssertEqual(bridge.scalarVolumes[2] ?? -1, 0.3, accuracy: 0.001)
         XCTAssertEqual(provider.value, 0.25, accuracy: 0.001)
+        XCTAssertEqual(provider.capability, .unavailable(reason: "rollback_failed"))
+    }
+
+    func testIncompleteRollbackReportsActualStateAndBecomesUnavailable() {
+        let bridge = FakeVolumeAudioBridge()
+        bridge.scalarVolumes = [1: 0.2, 2: 0.3]
+        bridge.failFirstVolumeReadAfterWriteForChannels = [2]
+        bridge.volumeWriteStatuses[1] = [noErr, kAudioHardwareUnspecifiedError]
+        let provider = RealVolumeProvider(bridge: bridge)
+        var observed: [(Double, Bool)] = []
+        provider.subscribe { observed.append(($0, $1)) }
+
+        provider.set(0.8)
+
+        XCTAssertEqual(provider.capability, .unavailable(reason: "rollback_failed"))
+        XCTAssertEqual(bridge.scalarVolumes[1] ?? -1, 0.8, accuracy: 0.001)
+        XCTAssertEqual(bridge.scalarVolumes[2] ?? -1, 0.3, accuracy: 0.001)
+        XCTAssertEqual(provider.value, 0.55, accuracy: 0.001)
+        XCTAssertEqual(observed.last?.0 ?? -1, 0.55, accuracy: 0.001)
     }
 
     func testMuteWriteFailureRollsBackVolumesAndPreviouslyChangedMutes() {
@@ -219,6 +239,7 @@ private final class FakeVolumeAudioBridge: VolumeAudioBridge {
     var failVolumeWritesForChannels: Set<UInt32> = []
     var failFirstVolumeReadAfterWriteForChannels: Set<UInt32> = []
     var failMuteWritesForChannels: Set<UInt32> = []
+    var volumeWriteStatuses: [UInt32: [OSStatus]] = [:]
     var setVolumeChannels: [UInt32] = []
     var setMuteOperations: [(channel: UInt32, muted: Bool)] = []
     var activeListenerCount = 0
@@ -295,6 +316,11 @@ private final class FakeVolumeAudioBridge: VolumeAudioBridge {
     func setVolume(device: AudioDeviceID, address: AudioObjectPropertyAddress, value: Float32) -> OSStatus {
         let channel = address.mElement
         setVolumeChannels.append(channel)
+        if var statuses = volumeWriteStatuses[channel], !statuses.isEmpty {
+            let status = statuses.removeFirst()
+            volumeWriteStatuses[channel] = statuses
+            if status != noErr { return status }
+        }
         if failVolumeWritesForChannels.contains(channel) { return kAudioHardwareUnspecifiedError }
         scalarVolumes[channel] = value
         if failFirstVolumeReadAfterWriteForChannels.contains(channel),

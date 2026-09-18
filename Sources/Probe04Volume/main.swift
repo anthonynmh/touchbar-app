@@ -1,10 +1,38 @@
 // Probe 04 — verify the exact Core Audio volume controls used by the app.
 //
-// The probe changes every selected volume control, verifies the effective
-// volume and mute state, then restores and verifies every captured control.
+// The default invocation is read-only. --write changes every selected volume
+// control and restores it. Mute can change only when --allow-unmute is also
+// passed, and every captured control is verified after restoration.
 
 import CoreAudio
 import Foundation
+
+let arguments = Array(CommandLine.arguments.dropFirst())
+var shouldWrite = false
+var allowUnmute = false
+for argument in arguments {
+    switch argument {
+    case "--write":
+        guard !shouldWrite else {
+            print("VOLUME fail reason=duplicate_write_flag")
+            exit(2)
+        }
+        shouldWrite = true
+    case "--allow-unmute":
+        guard !allowUnmute else {
+            print("VOLUME fail reason=duplicate_allow_unmute_flag")
+            exit(2)
+        }
+        allowUnmute = true
+    default:
+        print("VOLUME fail reason=unknown_flag flag=\(argument)")
+        exit(2)
+    }
+}
+guard !allowUnmute || shouldWrite else {
+    print("VOLUME fail reason=allow_unmute_requires_write")
+    exit(2)
+}
 
 struct VolumeControl {
     let address: AudioObjectPropertyAddress
@@ -190,6 +218,24 @@ guard originalVolumeRead.status == noErr, originalMuteRead.status == noErr else 
 let originalVolumes = originalVolumeRead.values
 let originalMutes = originalMuteRead.values
 let originalAverage = originalVolumes.map(Double.init).reduce(0, +) / Double(originalVolumes.count)
+let volumeChannels = volumes.map { String($0.channel) }.joined(separator: ",")
+let muteDescription = mutes.map { "\($0.channel):\($0.settable ? "rw" : "ro")" }
+    .joined(separator: ",")
+let originalMuteText = originalMutes.map { $0 ? "1" : "0" }.joined(separator: ",")
+
+guard shouldWrite else {
+    print(String(
+        format: "VOLUME ok mode=read-only device=%u strategy=%@ channels=%@ mute=%@ value=%.4f mutes=%@",
+        device,
+        discovery.strategy,
+        volumeChannels,
+        muteDescription,
+        originalAverage,
+        originalMuteText
+    ))
+    exit(0)
+}
+
 let target = originalAverage >= 0.5
     ? max(0, originalAverage - 0.05)
     : min(1, originalAverage + 0.05)
@@ -201,7 +247,7 @@ for control in volumes {
     exerciseStatuses.append(status)
     exerciseOK = exerciseOK && status == noErr
 }
-if exerciseOK, target > 0 {
+if exerciseOK, allowUnmute, target > 0 {
     for control in mutes where control.settable {
         let status = setMute(device, control.address, false)
         exerciseStatuses.append(status)
@@ -215,15 +261,19 @@ exerciseOK = exerciseOK
     && changedVolumeRead.status == noErr
     && changedMuteRead.status == noErr
     && changedVolumeRead.values.allSatisfy { abs(Double($0) - target) <= 0.01 }
-    && (target == 0 || changedMuteRead.values.allSatisfy { !$0 })
+    && (allowUnmute && target > 0
+        ? changedMuteRead.values.allSatisfy { !$0 }
+        : changedMuteRead.values == originalMutes)
 
 // Restoration is deliberately unconditional after the original snapshots exist.
 var restoreStatuses: [OSStatus] = []
 for (control, original) in zip(volumes, originalVolumes) {
     restoreStatuses.append(setVolume(device, control.address, original))
 }
-for (control, original) in zip(mutes, originalMutes) where control.settable {
-    restoreStatuses.append(setMute(device, control.address, original))
+if allowUnmute {
+    for (control, original) in zip(mutes, originalMutes) where control.settable {
+        restoreStatuses.append(setMute(device, control.address, original))
+    }
 }
 
 let restoredVolumeRead = readVolumes(device, volumes)
@@ -236,16 +286,12 @@ let restoredOK = restoreStatuses.allSatisfy { $0 == noErr }
     }
     && restoredMuteRead.values == originalMutes
 
-let volumeChannels = volumes.map { String($0.channel) }.joined(separator: ",")
-let muteDescription = mutes.map { "\($0.channel):\($0.settable ? "rw" : "ro")" }
-    .joined(separator: ",")
 let exerciseStatusText = exerciseStatuses.map(String.init).joined(separator: ",")
 let restoreStatusText = restoreStatuses.map(String.init).joined(separator: ",")
-let originalMuteText = originalMutes.map { $0 ? "1" : "0" }.joined(separator: ",")
 let changedMuteText = changedMuteRead.values.map { $0 ? "1" : "0" }.joined(separator: ",")
 let outcome = exerciseOK && restoredOK ? "ok" : "fail"
-print(String(format: "VOLUME %@ device=%u strategy=%@ channels=%@ mute=%@ original=%.4f target=%.4f originalMutes=%@ changedMutes=%@ exerciseStatuses=%@ exerciseRead=%d restoreStatuses=%@ restoreRead=%d restored=%d",
-             outcome, device, discovery.strategy, volumeChannels, muteDescription,
+print(String(format: "VOLUME %@ mode=write allowUnmute=%d device=%u strategy=%@ channels=%@ mute=%@ original=%.4f target=%.4f originalMutes=%@ changedMutes=%@ exerciseStatuses=%@ exerciseRead=%d restoreStatuses=%@ restoreRead=%d restored=%d",
+             outcome, allowUnmute ? 1 : 0, device, discovery.strategy, volumeChannels, muteDescription,
              originalAverage, target, originalMuteText, changedMuteText,
              exerciseStatusText, changedVolumeRead.status,
              restoreStatusText, restoredVolumeRead.status, restoredOK ? 1 : 0))
