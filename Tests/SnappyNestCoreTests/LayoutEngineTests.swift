@@ -16,13 +16,14 @@ final class LayoutEngineTests: XCTestCase {
         XCTAssertFalse(r.brightness.contains(CGPoint(x: 500, y: 15)))
     }
 
-    func testControlsPageIsACenteredClusterOrderedSlidersPlayPauseBattery() {
+    func testControlsPageIsACenteredClusterOrderedSlidersBattery() {
         let r = LayoutEngine(bounds: touchBarBounds, backingScale: 2.0, page: .controls).regions
         XCTAssertEqual(r.page, .controls)
         XCTAssertEqual(r.brightness.minX, r.right.minX, accuracy: 1e-6)
         XCTAssertGreaterThan(r.volume.minX, r.brightness.maxX)
-        XCTAssertGreaterThan(r.playPause.minX, r.volume.maxX)
-        XCTAssertGreaterThan(r.battery.minX, r.playPause.maxX)
+        XCTAssertGreaterThan(r.battery.minX, r.volume.maxX)
+        XCTAssertTrue(r.playPause.isNull, "play/pause lives on the playback page")
+        XCTAssertTrue(r.trail.isNull)
         XCTAssertEqual(r.battery.maxX, r.right.maxX, accuracy: 1e-6)
         XCTAssertEqual(r.right.midX, r.full.midX, accuracy: 1e-6)
         XCTAssertEqual(r.brightness.width, LayoutEngine.maximumSliderWidth, accuracy: 1e-6)
@@ -31,7 +32,44 @@ final class LayoutEngineTests: XCTestCase {
         XCTAssertTrue(r.middle.isNull)
     }
 
-    func testSkySpansFullWidthOnBothPages() {
+    func testPlaybackPageOrdersLabelsTrailAndSignposts() {
+        let r = LayoutEngine(bounds: touchBarBounds, backingScale: 2.0, page: .playback).regions
+        XCTAssertEqual(r.page, .playback)
+        let ordered = [r.elapsedLabel, r.trail, r.durationLabel, r.previous, r.playPause, r.next]
+        for (a, b) in zip(ordered, ordered.dropFirst()) {
+            XCTAssertGreaterThanOrEqual(b.minX, a.maxX, "regions must not overlap")
+        }
+        XCTAssertGreaterThanOrEqual(r.elapsedLabel.minX, r.full.minX)
+        XCTAssertLessThanOrEqual(r.next.maxX, r.full.maxX)
+        XCTAssertGreaterThan(r.trail.width, 400, "the trail is most of the strip")
+        XCTAssertTrue(r.middle.isNull)
+        XCTAssertTrue(r.brightness.isNull)
+        XCTAssertTrue(r.battery.isNull)
+        for region in ordered { XCTAssertEqual(region.height, r.full.height) }
+    }
+
+    func testTrailXAndTrailFractionRoundTrip() {
+        let engine = LayoutEngine(bounds: touchBarBounds, backingScale: 2.0)
+        let t = engine.with(page: .playback).regions.trail
+        for f in stride(from: 0.0, through: 1.0, by: 0.125) {
+            let x = engine.trailX(fraction: f, spriteHalfWidth: 12)
+            XCTAssertGreaterThanOrEqual(x, t.minX + 12 - 1e-6)
+            XCTAssertLessThanOrEqual(x, t.maxX - 12 + 1e-6)
+            XCTAssertEqual(engine.trailFraction(x: x, spriteHalfWidth: 12), f, accuracy: 1e-9)
+        }
+        XCTAssertEqual(engine.trailFraction(x: -50, spriteHalfWidth: 12), 0)
+        XCTAssertEqual(engine.trailFraction(x: 5000, spriteHalfWidth: 12), 1)
+    }
+
+    func testPageIndicesAreContiguousAroundTheWorld() {
+        XCTAssertEqual(LayoutEngine.Page.allCases.map(\.index), [-1, 0, 1])
+        XCTAssertEqual(LayoutEngine.Page(index: -1), .playback)
+        XCTAssertEqual(LayoutEngine.Page(index: 0), .world)
+        XCTAssertEqual(LayoutEngine.Page(index: 1), .controls)
+        XCTAssertNil(LayoutEngine.Page(index: 2))
+    }
+
+    func testSkySpansFullWidthOnEveryPage() {
         for page in LayoutEngine.Page.allCases {
             let engine = LayoutEngine(bounds: touchBarBounds, backingScale: 2.0, page: page)
             XCTAssertEqual(engine.regions.sky, engine.bounds)

@@ -59,9 +59,7 @@ final class SpriteRenderTests: XCTestCase {
             ControlGlyphs.volume(level: 0.3, muted: false, available: true, scale: scale),
             ControlGlyphs.volume(level: 0.8, muted: false, available: true, scale: scale),
             ControlGlyphs.volume(level: 0.8, muted: true, available: true, scale: scale),
-            ControlGlyphs.volume(level: 0.8, muted: false, available: false, scale: scale),
-            ControlGlyphs.playPause(isPlaying: true, scale: scale),
-            ControlGlyphs.playPause(isPlaying: false, scale: scale)
+            ControlGlyphs.volume(level: 0.8, muted: false, available: false, scale: scale)
         ]
         for img in images { XCTAssertTrue(isNonEmpty(img)) }
         // Level buckets share one cached image; different buckets do not.
@@ -69,6 +67,33 @@ final class SpriteRenderTests: XCTestCase {
                       === ControlGlyphs.volume(level: 0.45, muted: false, available: true, scale: scale))
         XCTAssertFalse(ControlGlyphs.volume(level: 0.3, muted: false, available: true, scale: scale)
                        === ControlGlyphs.volume(level: 0.8, muted: false, available: true, scale: scale))
+    }
+
+    func testSignpostGlyphStates() {
+        for available in [true, false] {
+            XCTAssertTrue(isNonEmpty(SignpostGlyphs.image(.previous, available: available, scale: scale)))
+            XCTAssertTrue(isNonEmpty(SignpostGlyphs.image(.next, available: available, scale: scale)))
+            XCTAssertTrue(isNonEmpty(SignpostGlyphs.image(.playPause, isPlaying: true, available: available, scale: scale)))
+            XCTAssertTrue(isNonEmpty(SignpostGlyphs.image(.playPause, isPlaying: false, available: available, scale: scale)))
+        }
+        XCTAssertTrue(SignpostGlyphs.image(.next, available: true, scale: scale)
+                      === SignpostGlyphs.image(.next, available: true, scale: scale), "cached")
+    }
+
+    func testHardHatClipsDifferFromTheBareClips() {
+        let bare = PetSprites.image(action: .idle, frame: 0, facing: .right, scale: scale)
+        let hat = PetSprites.image(action: .tinker, frame: 0, facing: .right, scale: scale)
+        XCTAssertNotEqual(bare.dataProvider?.data as Data?, hat.dataProvider?.data as Data?)
+        // The hat lands over four frames: the last suit-up frame is the tinker pose's hat height.
+        XCTAssertTrue(isNonEmpty(PetSprites.image(action: .suitUp, frame: 3, facing: .left, scale: scale)))
+    }
+
+    func testTimeStringFormatsMinutesAndSeconds() {
+        XCTAssertEqual(SceneRenderer.timeString(0), "0:00")
+        XCTAssertEqual(SceneRenderer.timeString(65.9), "1:05")
+        XCTAssertEqual(SceneRenderer.timeString(3599), "59:59")
+        XCTAssertEqual(SceneRenderer.timeString(nil), "–:––")
+        XCTAssertEqual(SceneRenderer.timeString(-1), "–:––")
     }
 
     func testSkyImageMatchesBoundsAndKeyChangesPerMinute() {

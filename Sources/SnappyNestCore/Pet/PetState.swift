@@ -18,6 +18,12 @@ public enum PetAction: String, CaseIterable, Equatable, Hashable {
     case happy
     /// Reaction to a second tap in quick succession. Never scheduled.
     case surprised
+    /// Controls page: the hard hat drops onto the pet's head. Never scheduled.
+    case suitUp
+    /// Controls page: hard hat on, spanner in paw, idling. Never scheduled.
+    case tinker
+    /// Leaving the controls page: the hat pops back off. Never scheduled.
+    case suitDown
 
     public var suggestedFPS: Int {
         switch self {
@@ -26,13 +32,15 @@ public enum PetAction: String, CaseIterable, Equatable, Hashable {
         case .walk, .progressFollow:              return 8
         case .jump, .celebrate, .wake:            return 10
         case .happy, .surprised:                  return 10
+        case .suitUp, .suitDown:                  return 10
+        case .tinker:                             return 4
         case .dash:                               return 12
         }
     }
 
     public var isRestful: Bool {
         switch self {
-        case .idle, .blink, .sleep, .stargaze: return true
+        case .idle, .blink, .sleep, .stargaze, .tinker: return true
         default:                                return false
         }
     }
@@ -47,12 +55,18 @@ public enum PetAction: String, CaseIterable, Equatable, Hashable {
         case .jump, .happy:                       return 4
         case .celebrate, .splash, .wake:          return 2
         case .surprised:                          return 3
+        case .suitUp, .tinker, .suitDown:         return 4
         }
     }
 
     /// True for the two tap reactions; they override the schedule briefly.
     public var isReaction: Bool {
         self == .happy || self == .surprised
+    }
+
+    /// True while the pet wears the hard hat (controls page).
+    public var wearsHardHat: Bool {
+        self == .suitUp || self == .tinker || self == .suitDown
     }
 }
 

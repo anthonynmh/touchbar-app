@@ -28,7 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var touchBarBounds = NSRect(x: 0, y: 0, width: 1085, height: 30)
     private let seed: UInt64 = 0xC0FF_EECA_FED0_0DF0
 
-    /// Which page the strip shows. The pet always lives in the world layout.
+    /// Which page the strip shows. The pet follows the camera (`PetController.Mode`).
     private var page: LayoutEngine.Page = .world
     private var controlsLastTouchedAt: Date?
     /// The controls page slides back to the world after this much idle time.
@@ -64,8 +64,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         renderer = SceneRenderer(frame: touchBarBounds)
         renderer.onBrightnessChange = { [weak self] v in self?.touchedControls(); self?.brightness.set(v) }
         renderer.onVolumeChange     = { [weak self] v in self?.touchedControls(); self?.volume.set(v) }
-        renderer.onTogglePlayPause  = { [weak self] in self?.touchedControls(); self?.activeSource().togglePlayPause() }
+        renderer.onTogglePlayPause  = { [weak self] in self?.activeSource().togglePlayPause() }
+        renderer.onNextTrack        = { [weak self] in self?.activeSource().nextTrack() }
+        renderer.onPreviousTrack    = { [weak self] in self?.activeSource().previousTrack() }
         renderer.onPageChange       = { [weak self] page in self?.setPage(page) }
+        renderer.onSeek = { [weak self] fraction in
+            guard let self else { return }
+            self.pet.seekTo(fraction: fraction, now: self.clock.now)
+            self.seek(toFraction: fraction)
+            self.renderOnce()
+        }
+        renderer.onScrubBegin = { [weak self] in
+            guard let self else { return }
+            self.pet.beginScrub(now: self.clock.now)
+        }
+        renderer.onScrubMove = { [weak self] x in
+            guard let self else { return }
+            self.pet.scrub(x: x, now: self.clock.now)
+            self.renderOnce()
+        }
+        renderer.onScrubEnd = { [weak self] in
+            guard let self else { return }
+            if let fraction = self.pet.endScrub(now: self.clock.now) {
+                self.seek(toFraction: fraction)
+            }
+            self.renderOnce()
+        }
         renderer.onPetTap = { [weak self] in
             guard let self else { return }
             self.pet.tapPet(now: self.clock.now)
@@ -173,8 +197,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         page = newPage
         controlsLastTouchedAt = newPage == .controls ? clock.now : nil
         composer = SceneComposer(layout: composer.layout.with(page: newPage))
-        NSLog("[SnappyNest] page=%@", newPage == .world ? "world" : "controls")
+        pet.enter(Self.petMode(for: newPage), now: clock.now)
+        NSLog("[SnappyNest] page=%@", String(describing: newPage))
         renderOnce()
+    }
+
+    private static func petMode(for page: LayoutEngine.Page) -> PetController.Mode {
+        switch page {
+        case .playback: return .playback
+        case .world:    return .roam
+        case .controls: return .workshop
+        }
+    }
+
+    /// Seek the active source to a fraction of the current track. The
+    /// source's own gate decides whether anything is sent; the readback
+    /// steers the pet afterwards.
+    private func seek(toFraction fraction: Double) {
+        let media = currentMedia()
+        guard media.canSeek, let duration = media.duration else { return }
+        activeSource().seek(to: fraction * duration)
     }
 
     private func renderOnce() {
@@ -219,7 +261,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .spotify: return mediaSpotify
         case .browser: return mediaBrowser
         case .auto:
-            return mediaSpotify.snapshot.state == .playing ? mediaSpotify : mediaBrowser
+            // The same source `currentMedia()` chose, so a seek or skip goes
+            // to the player the pet is showing (paused Spotify included).
+            return currentMedia().identity == mediaSpotify.identity ? mediaSpotify : mediaBrowser
         }
     }
 
@@ -303,11 +347,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         touchBarBounds = measuredBounds
         composer = SceneComposer(layout: layout)
+        let mode = pet.mode
         pet = PetController(
             seed: seed,
             layout: layout.with(page: .world),
             initial: resizedState
         )
+        pet.enter(mode, now: clock.now)
         NSLog(
             "[SnappyNest] scene layout width=%.1f height=%.1f backingScale=%.2f",
             geometry.width, geometry.height, geometry.backingScale

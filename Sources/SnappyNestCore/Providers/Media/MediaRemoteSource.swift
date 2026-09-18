@@ -11,9 +11,18 @@ public final class MediaRemoteSource: MediaSource {
     private typealias GetNowPlaying = @convention(c) (DispatchQueue, @escaping @convention(block) (CFDictionary?) -> Void) -> Void
     private typealias SendCommand   = @convention(c) (Int32, CFDictionary?) -> Bool
     private typealias RegisterNotif = @convention(c) (Bool) -> Void
+    private typealias SetElapsed    = @convention(c) (Double) -> Void
 
     private let getFn: GetNowPlaying?
     private let sendFn: SendCommand?
+    private let setElapsedFn: SetElapsed?
+
+    /// MRCommand values, stable across the macOS versions we target.
+    private enum Command: Int32 {
+        case togglePlayPause = 2
+        case nextTrack = 4
+        case previousTrack = 5
+    }
 
     private var pollTimer: Timer?
     private var handlers: [(MediaSnapshot) -> Void] = []
@@ -32,6 +41,12 @@ public final class MediaRemoteSource: MediaSource {
             sendFn = unsafeBitCast(sendSym, to: SendCommand.self)
         } else {
             sendFn = nil
+        }
+        if let handle = handle,
+           let seekSym = dlsym(handle, "MRMediaRemoteSetElapsedTime") {
+            setElapsedFn = unsafeBitCast(seekSym, to: SetElapsed.self)
+        } else {
+            setElapsedFn = nil
         }
         // Note: MRMediaRemoteRegisterForNowPlayingNotifications has changed
         // signature across OS versions and can crash if we call it wrong.
@@ -81,7 +96,9 @@ public final class MediaRemoteSource: MediaSource {
             title: title,
             canPlayPause: true,
             canReadPosition: elapsed != nil,
-            canReadDuration: (duration ?? 0) > 0.5
+            canReadDuration: (duration ?? 0) > 0.5,
+            canSeek: elapsed != nil && (duration ?? 0) > 0.5 && setElapsedFn != nil,
+            canSkip: sendFn != nil
         )
     }
 
@@ -91,13 +108,32 @@ public final class MediaRemoteSource: MediaSource {
         handlers.forEach { $0(new) }
     }
 
-    public func togglePlayPause() {
-        // With no now-playing client, mediaremoted routes the command to the
-        // default/last media app and launches it (like the F8 key opening
-        // Music). Only send when something is actually registered.
-        guard snapshot.state == .playing || snapshot.state == .paused else { return }
-        // MRCommand 2 = togglePlayPause on most macOS versions.
-        _ = sendFn?(2, nil)
+    public func togglePlayPause() { send(.togglePlayPause) }
+    public func nextTrack() { send(.nextTrack) }
+    public func previousTrack() { send(.previousTrack) }
+
+    /// Whether a command may be sent at all: with no now-playing client,
+    /// mediaremoted routes it to the default/last media app and launches it
+    /// (like the F8 key opening Music). Only send when something is
+    /// actually registered.
+    private var hasNowPlayingClient: Bool {
+        snapshot.state == .playing || snapshot.state == .paused
+    }
+
+    private func send(_ command: Command) {
+        guard hasNowPlayingClient else { return }
+        _ = sendFn?(command.rawValue, nil)
+        refreshSoon()
+    }
+
+    public func seek(to seconds: TimeInterval) {
+        guard hasNowPlayingClient, snapshot.canSeek, let setElapsedFn = setElapsedFn else { return }
+        let duration = snapshot.duration ?? seconds
+        setElapsedFn(min(duration, max(0, seconds)))
+        refreshSoon()
+    }
+
+    private func refreshSoon() {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
             self?.refresh()
         }

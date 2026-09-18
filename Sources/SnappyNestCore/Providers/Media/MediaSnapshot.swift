@@ -15,6 +15,10 @@ public struct MediaSnapshot: Equatable {
     public let canPlayPause: Bool
     public let canReadPosition: Bool
     public let canReadDuration: Bool
+    /// The source can move the playhead (`MediaSource.seek(to:)`).
+    public let canSeek: Bool
+    /// The source can skip tracks (`nextTrack` / `previousTrack`).
+    public let canSkip: Bool
 
     public init(
         identity: String,
@@ -26,7 +30,9 @@ public struct MediaSnapshot: Equatable {
         title: String? = nil,
         canPlayPause: Bool = false,
         canReadPosition: Bool = false,
-        canReadDuration: Bool = false
+        canReadDuration: Bool = false,
+        canSeek: Bool = false,
+        canSkip: Bool = false
     ) {
         self.identity = identity
         self.state = state
@@ -38,6 +44,8 @@ public struct MediaSnapshot: Equatable {
         self.canPlayPause = canPlayPause
         self.canReadPosition = canReadPosition
         self.canReadDuration = canReadDuration
+        self.canSeek = canSeek
+        self.canSkip = canSkip
     }
 
     public static let unknown = MediaSnapshot(identity: "none", state: .unknown)
@@ -79,6 +87,11 @@ public protocol MediaSource: AnyObject {
     var identity: String { get }
     var snapshot: MediaSnapshot { get }
     func togglePlayPause()
+    /// Move the playhead to `seconds`. Implementations must never launch
+    /// the media app; when nothing is playing this is a no-op.
+    func seek(to seconds: TimeInterval)
+    func nextTrack()
+    func previousTrack()
     func subscribe(_ handler: @escaping (MediaSnapshot) -> Void)
     func unsubscribeAll()
 }
@@ -92,6 +105,9 @@ public final class FakeMediaSource: MediaSource {
         }
     }
     public var onTogglePlayPause: () -> Void = {}
+    public private(set) var seekCalls: [TimeInterval] = []
+    public private(set) var nextCalls = 0
+    public private(set) var previousCalls = 0
     private var handlers: [(MediaSnapshot) -> Void] = []
 
     public init(identity: String = "fake", snapshot: MediaSnapshot = .unknown) {
@@ -102,6 +118,9 @@ public final class FakeMediaSource: MediaSource {
     public func set(_ snapshot: MediaSnapshot) { self.snapshot = snapshot }
 
     public func togglePlayPause() { onTogglePlayPause() }
+    public func seek(to seconds: TimeInterval) { seekCalls.append(seconds) }
+    public func nextTrack() { nextCalls += 1 }
+    public func previousTrack() { previousCalls += 1 }
 
     public func subscribe(_ handler: @escaping (MediaSnapshot) -> Void) {
         handlers.append(handler)
