@@ -77,10 +77,12 @@ Re-run any probe with `./Install/run-probe.sh 0N` after building.
   private `DisplayServicesGetBrightness` / `DisplayServicesSetBrightness` from
   `/System/Library/PrivateFrameworks/DisplayServices.framework` — the only
   brightness path that works on Apple Silicon internal panels.
-- **04 · Volume read/write (Core Audio):** ✅ ok · Default output device
-  master channel is settable. Read `0.0000`, wrote `0.02`, restored `0.0000`
-  — both `AudioObjectSetPropertyData` calls returned `noErr` (0). Public API,
-  no private symbols.
+- **04 · Volume read/write (Core Audio):** ✅ ok · On device `97`, the revised
+  probe selected the writable virtual-main control, changed `0.0253` to
+  `0.0753`, verified the effective value and unmuted state, then restored the
+  original volume and mute with every operation returning `noErr` (0). The app
+  falls back to the device's complete preferred stereo pair when no writable
+  virtual-main or main control exists; it never writes only the left channel.
 - **05a · Spotify AppleScript adapter:** ✅ ok · `player state=paused`,
   `player position=150.22 s`, `duration=218.173 s`, `name of current track="Mother"`.
   First run of the bundled app will trigger the Automation permission prompt.
@@ -102,7 +104,9 @@ Current build (`v0.1.0-dev`), verified on this Mac on 2026-09-18:
 - ✅ Layer-backed `SceneRenderer` at nearest-neighbor filtering,
   measured-bounds pixel-alignment (2× on this Mac).
 - ✅ Segmented battery health bar with charging bolt, fed from IOPS.
-- ✅ Directly-draggable brightness (`DisplayServices`) and volume (Core Audio).
+- ✅ Directly-draggable brightness (`DisplayServices`) and volume (Core Audio),
+  including preferred-stereo fallback, mute handling, confirmed readback, and
+  rollback after partial write failure.
 - ✅ Contextual play/pause reserved slot; toggles the active media source.
 - ✅ Pet state machine (12 actions) with seeded, hour-of-day-weighted
   free-roam scheduler; progress-follow mode when duration+position are
@@ -115,9 +119,9 @@ Current build (`v0.1.0-dev`), verified on this Mac on 2026-09-18:
 - ✅ Public fallback activates the accessory app and uses a key-capable hidden
   window to establish the responder chain.
 - ✅ Menu bar 🐾, escape hatch (`Opt+Cmd+\` or menu), enlarged 6× preview.
-- ✅ 46 XCTest cases: 41 model tests plus 5 presenter lifecycle tests covering
-  modal call order, hide/show, idempotent cleanup, unavailable selectors, and
-  attachment-timeout fallback.
+- ✅ 63 XCTest cases: 55 core tests plus 8 UI/presenter tests, including 13
+  isolated Core Audio bridge tests for channel selection, mute handling,
+  rollback, device availability, rebinding, and listener cleanup.
 - ✅ `install.sh` / `uninstall.sh` / `Makefile` including `dmg` +
   `notarize` opt-in targets.
 
@@ -147,8 +151,8 @@ touchbar-pet/
     Probe04Volume/             # Core Audio roundtrip
     Probe05Media/              # Spotify + MediaRemote adapters
   Tests/
-    SnappyNestCoreTests/       # 41 model XCTest cases
-    SnappyNestUITests/         # presenter lifecycle XCTest cases
+    SnappyNestCoreTests/       # 55 model/provider XCTest cases
+    SnappyNestUITests/         # 8 renderer/presenter XCTest cases
   Install/
     install.sh   uninstall.sh   wrap-as-app.sh   run-probe.sh
   Makefile
@@ -261,8 +265,10 @@ simulation panel for clock / battery / playback. All state will persist to
 
 ## Testing
 
-- `swift test` runs 41 model tests and 5 presenter lifecycle tests.
+- `swift test` runs 63 tests: 55 core/provider tests and 8 UI/presenter tests.
 - `./Install/run-probe.sh 0N` (N = 1…5) rebuilds and runs a specific probe.
+- Probe 04 briefly changes the active output volume, verifies volume and mute
+  readback, and restores every captured control before reporting success.
 - Battery-independence acceptance test in `PetControllerBatteryIndependenceTests`:
   600 ticks × 3 battery states (dying / full / charging) produce a
   byte-identical `PetAction` log for a fixed seed + clock + media.
@@ -284,8 +290,11 @@ simulation panel for clock / battery / playback. All state will persist to
 - **Brightness slider is greyed.** `DisplayServicesGetBrightness` returned no value.
   This is the honest `.unavailable` state — no fallback (per design; simulating F1/F2
   key events is out of scope).
-- **Volume slider is greyed.** The current output device is fixed-volume (HDMI/S-PDIF
-  passthrough). Snappy Nest re-binds automatically when you switch to a settable device.
+- **Volume slider is greyed.** The current output device is absent or exposes no
+  writable virtual-main, main, or complete stereo volume pair (common with
+  HDMI/S-PDIF passthrough). Snappy Nest re-binds automatically when the default
+  output changes. Run `./Install/run-probe.sh 04` to see the selected strategy,
+  channels, mute controls, write/readback statuses, and restoration result.
 - **Menu bar says “App-frontmost.”** The private persistent path was unavailable
   or failed to attach, so Snappy Nest activated its public fallback. That bar is
   expected only while Snappy Nest is frontmost.

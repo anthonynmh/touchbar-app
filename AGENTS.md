@@ -77,4 +77,11 @@ new behavior that is not obvious from the source.
   mute integration, optimistic writes, and an AppleScript fallback that does not
   compile on the target system. Treat these commits as investigation, not a
   verified fix.
-
+- 2026-09-18 — Replaced the failed volume path with an injectable Core Audio
+  bridge and transactional provider (`a6af578`). The provider prefers a writable
+  virtual-main control, otherwise writes the complete preferred stereo pair,
+  clears every relevant writable mute control above zero, verifies readback, and
+  rolls back partial failures. Thirteen isolated provider tests pass. Revised
+  Probe 04 passed on hardware using device 97 and `virtual-main`: it changed
+  `0.0253` to `0.0753`, confirmed volume/mute, and restored the original state
+  with all statuses equal to `noErr`.
