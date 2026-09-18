@@ -4,6 +4,9 @@ This file records hardware-specific findings and development decisions that
 future agents must preserve. Add concise, dated entries when a change reveals
 new behavior that is not obvious from the source.
 
+`CLAUDE.md` imports this file (`@AGENTS.md`) so Claude Code sessions read the
+same notes. Keep all content here; do not duplicate it in `CLAUDE.md`.
+
 ## Required verification environment
 
 - Target hardware is a 13-inch `MacBookPro17,1` with a physical Touch Bar and
@@ -63,6 +66,26 @@ new behavior that is not obvious from the source.
 - Fixed-volume outputs such as some HDMI and digital passthrough devices must be
   reported as unavailable rather than pretending a write succeeded.
 
+## Media control findings
+
+- AppleScript `tell application "Spotify"` launches Spotify whenever an Apple
+  event is delivered to a process that is absent or tearing down. Checking
+  `System Events` process names inside the script is a race: during quit the
+  process is still listed, the event is sent, and Spotify relaunches ("pops
+  back"). An app-side `is running` check has the same window.
+- Spotify posts `com.spotify.client.PlaybackStateChanged` with
+  `Player State = "Stopped"` while quitting. Treat that notification as a
+  quit signal: publish `.stopped` from the payload and send no Apple event
+  for a quiesce window (`SpotifyMediaSource.quiesceInterval`), and gate every
+  script on `NSRunningApplication` (running and not `isTerminated`). Poll only
+  between `NSWorkspace` launch/terminate notifications.
+- The pet must never launch a media app. Spotify play/pause is a no-op when
+  Spotify is not running, and `MRMediaRemoteSendCommand` is only sent when a
+  now-playing client exists; otherwise mediaremoted launches the default media
+  app, as the F8 key does.
+- `MRMediaRemoteGetNowPlayingInfo`, Core Audio, and DisplayServices reads are
+  passive and cannot launch other applications.
+
 ## Development log
 
 - 2026-09-18 — Replaced the tray-item-only presenter with a retained tray
@@ -90,3 +113,10 @@ new behavior that is not obvious from the source.
   `--write`, and Probe 04 requires `--allow-unmute` before exercising mute.
   Brightness and volume providers verify every write and rollback readback, and
   become unavailable after an incomplete rollback rather than reporting success.
+- 2026-09-18 — Fixed Spotify relaunching on quit while the app ran. Every
+  Spotify Apple event now passes one Swift-side gate (installed, running, not
+  terminated, outside the quit quiesce window), polling runs only while Spotify
+  is running, the compiled script is cached and serialized, and play/pause
+  never launches Spotify or (via MediaRemote) the default media app. The bridge
+  is injectable and nine isolated `SpotifyMediaSourceTests` cover the policy.
+  Probe 05 uses the same guards.
