@@ -3,15 +3,18 @@
 A pixel-art world that lives on the Touch Bar: a live sky that follows the local
 time of day (dawn glow, blue noon, starry night) with the sun and moon crossing the
 strip, and an orange cat-like pet that roams, reacts to taps, and walks where you
-tap. Tap the sun or moon to see the time. Swipe the scene left to pan to the
-controls — brightness, volume, play/pause and battery sit in the same landscape —
-and swipe back (or wait ten seconds) to return to the pet.
+tap (tap twice to make it sprint). Tap the sun or moon to see the time. The strip
+is three scenes side by side and the pet follows you between them: drag the scene
+right to reach the **playback** page, where the pet becomes the playhead on a dirt
+trail (drag it to seek; wooden signposts skip and play/pause), or drag left to
+the **controls** page — brightness, volume and battery in the same landscape —
+where the pet puts on a hard hat and tinkers until you leave.
 
 Local-only. No cloud, no telemetry, no microphone, and no network code. Works
 fully offline. The current local build is not App-Sandboxed.
 
-The pet doubles as a playback progress indicator for Spotify and, when the browser
-publishes Now Playing info, for YouTube in Firefox.
+On the playback page the pet doubles as a playback progress indicator for Spotify
+and, when the browser publishes Now Playing info, for YouTube in Firefox.
 
 ## Contents
 
@@ -113,16 +116,27 @@ Current build (`v0.1.0-dev`), verified on this Mac on 2026-09-18:
   reveals a localized clock for three seconds.
 - ✅ Procedural cat-like pet (`PetSprites`, 24-point cell) with a pose and
   expression for every action, real walking/dashing between seeded
-  destinations, a happy/surprised reaction when tapped, and walk-to-tap on the
-  ground. Playback progress-follow still takes priority whenever media with a
-  known position is playing.
+  destinations, a happy/surprised reaction when tapped, walk-to-tap on the
+  ground and a sprint on a quick second tap. On the world page media is
+  ignored; the pet follows playback only on the playback page.
 - ✅ Layer-backed `SceneRenderer` at nearest-neighbor filtering,
   measured-bounds pixel-alignment (2× on this Mac).
-- ✅ Two-page strip: the world and, to its right, a compact controls cluster
-  over the same sky and continuous terrain. A horizontal drag anywhere that is
-  not a live slider pans the camera with the finger; release snaps to the
-  nearer page and a flick commits either way. The controls page pans back to
-  the world after ten idle seconds (`AppDelegate.controlsIdleTimeout`).
+- ✅ Three-page strip — playback, world, controls — over the same sky and
+  continuous terrain. A horizontal drag anywhere that is not a live slider or
+  the playback pet pans the camera with the finger; release snaps to the
+  nearest page and a flick moves one page. The controls page pans back to the
+  world after ten idle seconds (`AppDelegate.controlsIdleTimeout`). The pet
+  is drawn above the pages, so it stays on screen while the scenery slides
+  and then dashes to its place on the new page.
+- ✅ Playback page: a dirt trail the pet walks as the track plays, `m:ss`
+  elapsed/duration labels, and wooden signposts for previous / play-pause /
+  next. Drag the pet along the trail or tap the trail to seek; Spotify seeks
+  and skips via AppleScript behind the same never-launch gate as play/pause,
+  the browser via MediaRemote (`MRMediaRemoteSetElapsedTime`; some players
+  ignore it, in which case the readback simply steers the pet back).
+- ✅ Controls page: the pet dashes in beside the cluster, a hard hat drops onto
+  its head (`suitUp`), and it idles with a spanner (`tinker`) until it leaves
+  (`suitDown`).
 - ✅ Battery glyph with proportional fill (green / amber / red), a drawn charging
   bolt, and a percentage label at the far right of the controls page, fed from
   IOPS.
@@ -130,12 +144,12 @@ Current build (`v0.1.0-dev`), verified on this Mac on 2026-09-18:
   including preferred-stereo fallback, mute handling, confirmed readback, and
   rollback after partial write failure. Sliders show a filled track, a large
   knob, and sun/speaker icons whose arcs follow the level; mute shows a slash.
-- ✅ Contextual play/pause button (circle glyph); toggles the active media source.
-- ✅ `LayoutEngine.Page` models the pages; the pet always uses the world layout
-  so playback progress-follow and roaming are unaffected by which page shows.
-- ✅ Pet state machine (12 actions) with seeded, hour-of-day-weighted
-  free-roam scheduler; progress-follow mode when duration+position are
-  known; **battery is not a scheduler input** (enforced by types + test).
+- ✅ `LayoutEngine.Page` models the pages; `PetController.Mode` (roam,
+  playback, workshop) follows the page the camera settled on.
+- ✅ Pet state machine (17 actions) with seeded, hour-of-day-weighted
+  free-roam scheduler; progress-follow mode on the playback page when
+  duration+position are known; **battery is not a scheduler input**
+  (enforced by types + test).
 - ✅ Spotify AppleScript adapter, MediaRemote adapter for the browser.
 - ✅ Persistent Touch Bar presenter with a small retained tray anchor and a
   separate maximum-width system-modal bar. Installation becomes `visible` only
@@ -179,8 +193,8 @@ touchbar-pet/
     Probe04Volume/             # Core Audio roundtrip
     Probe05Media/              # Spotify + MediaRemote adapters
   Tests/
-    SnappyNestCoreTests/       # 83 model/provider XCTest cases
-    SnappyNestUITests/         # 24 renderer/presenter/snapshot XCTest cases
+    SnappyNestCoreTests/       # 100 model/provider XCTest cases
+    SnappyNestUITests/         # 30 renderer/presenter/snapshot XCTest cases
   Install/
     install.sh   uninstall.sh   clean.sh   wrap-as-app.sh   run-probe.sh
   Makefile
@@ -295,7 +309,7 @@ simulation panel for clock / battery / playback. All state will persist to
 
 ## Testing
 
-- `swift test` runs 107 tests: 83 core/provider tests and 24 UI/presenter tests
+- `swift test` runs 130 tests: 100 core/provider tests and 30 UI/presenter tests
   (three snapshot tests are skipped unless `SNAPPY_SNAPSHOT_DIR` is set).
 - `SNAPPY_SNAPSHOT_DIR=/some/dir swift test --filter SceneSnapshotTests` writes
   PNGs of the pet clip sheet, the battery/control glyphs, and the full strip at

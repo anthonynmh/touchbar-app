@@ -70,6 +70,15 @@ same notes. Keep all content here; do not duplicate it in `CLAUDE.md`.
   the sliders still scrub.
 - Users found a tap-to-toggle tab and a translucent control panel broke the
   immersion; the controls must sit in the same sky and terrain as the pet.
+- The pet layer is a child of the root layer, above the three page
+  containers, and `PetState.position` is always in strip coordinates. That
+  is what lets the pet stay on screen while a page slides and then travel
+  to its spot on the new page (`PetController.enter(_:now:)`); do not move
+  it into a page container.
+- Playback seeking is displayed through the pet only: after a scrub or trail
+  tap the controller holds the pet at the target (`PetController.seekHold`)
+  until the source's readback catches up. The time labels always come from
+  the media snapshot, never from the pending seek.
 
 ## Volume control findings
 
@@ -110,6 +119,12 @@ same notes. Keep all content here; do not duplicate it in `CLAUDE.md`.
   app, as the F8 key does.
 - `MRMediaRemoteGetNowPlayingInfo`, Core Audio, and DisplayServices reads are
   passive and cannot launch other applications.
+- Seek and skip use the same gates: Spotify `set player position` /
+  `next track` / `previous track` only pass `shouldScript()`; MediaRemote
+  `MRMediaRemoteSetElapsedTime` and commands 4/5 (next/previous) are only
+  sent while a now-playing client is registered. Browser players may ignore
+  `SetElapsedTime`; the 1 Hz readback is the truth (not yet measured on
+  hardware per player).
 
 ## Development log
 
@@ -158,3 +173,10 @@ same notes. Keep all content here; do not duplicate it in `CLAUDE.md`.
   was rejected as "collapsible", and a translucent panel behind the controls
   was rejected for breaking immersion. The final controls page is a compact
   centered cluster over continuous terrain. Verified on hardware.
+- 2026-09-18 — Added the playback page on `feat/playback-scene`: three pages
+  (playback ← world → controls), the pet drawn above the pages so it follows
+  the camera, `PetController.Mode` per page (roam / playback / workshop),
+  1-tap walk / 2-tap sprint, trail scrubbing and signposts for seek/skip,
+  hard-hat `suitUp`/`tinker`/`suitDown` clips, and seek/skip on both media
+  sources behind the existing launch gates. Play/pause moved off the
+  controls page. 130 tests. Hardware verification pending.
