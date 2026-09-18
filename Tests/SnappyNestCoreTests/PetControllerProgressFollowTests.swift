@@ -17,7 +17,7 @@ final class PetControllerProgressFollowTests: XCTestCase {
         controller.tick(now: now(), media: media)
         XCTAssertEqual(controller.state.action, .progressFollow)
 
-        let expectedX = layout().petGroundX(fraction: 0.25, spriteHalfWidth: 8)
+        let expectedX = layout().petGroundX(fraction: 0.25, spriteHalfWidth: 12)
         XCTAssertEqual(controller.state.position.x, expectedX, accuracy: 1e-6)
     }
 
@@ -48,7 +48,7 @@ final class PetControllerProgressFollowTests: XCTestCase {
 
         XCTAssertNotEqual(firstX, secondX)
         // Position went straight to the new fraction, no intermediate frames.
-        let expectedX = layout().petGroundX(fraction: 0.9, spriteHalfWidth: 8)
+        let expectedX = layout().petGroundX(fraction: 0.9, spriteHalfWidth: 12)
         XCTAssertEqual(secondX, expectedX, accuracy: 1e-6)
     }
 }

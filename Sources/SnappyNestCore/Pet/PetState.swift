@@ -14,6 +14,10 @@ public enum PetAction: String, CaseIterable, Equatable, Hashable {
     case sleep
     case wake
     case progressFollow
+    /// Reaction to a tap. Never scheduled: no entry in the scheduler weights.
+    case happy
+    /// Reaction to a second tap in quick succession. Never scheduled.
+    case surprised
 
     public var suggestedFPS: Int {
         switch self {
@@ -21,6 +25,7 @@ public enum PetAction: String, CaseIterable, Equatable, Hashable {
         case .inspect, .splash, .stargaze:        return 6
         case .walk, .progressFollow:              return 8
         case .jump, .celebrate, .wake:            return 10
+        case .happy, .surprised:                  return 10
         case .dash:                               return 12
         }
     }
@@ -30,6 +35,24 @@ public enum PetAction: String, CaseIterable, Equatable, Hashable {
         case .idle, .blink, .sleep, .stargaze: return true
         default:                                return false
         }
+    }
+
+    /// Number of distinct sprite frames in this action's clip. Sprites and
+    /// tests index frames with `frameIndex % frameCount`.
+    public var frameCount: Int {
+        switch self {
+        case .idle, .sleep, .stargaze, .inspect:  return 2
+        case .blink:                              return 4
+        case .walk, .progressFollow, .dash:       return 2
+        case .jump, .happy:                       return 4
+        case .celebrate, .splash, .wake:          return 2
+        case .surprised:                          return 3
+        }
+    }
+
+    /// True for the two tap reactions; they override the schedule briefly.
+    public var isReaction: Bool {
+        self == .happy || self == .surprised
     }
 }
 
@@ -46,6 +69,17 @@ public struct PetState: Equatable {
         self.facing = facing
         self.position = position
         self.frameIndex = frameIndex
+    }
+
+    /// The sprite cell rect for hit-testing: `position` is the bottom-center
+    /// ground anchor, so the cell extends upward and half a width each side.
+    public func hitRect(spriteSize: CGSize) -> CGRect {
+        CGRect(
+            x: position.x - spriteSize.width / 2,
+            y: position.y - spriteSize.height,
+            width: spriteSize.width,
+            height: spriteSize.height
+        )
     }
 
     public static let placeholder = PetState(

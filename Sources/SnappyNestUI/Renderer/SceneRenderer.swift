@@ -266,19 +266,19 @@ public final class SceneRenderer: NSView {
     // MARK: - Pet
 
     private func paintPet(state: PetState, regions: LayoutEngine.Regions) {
-        let size = PlaceholderSprites.cellSize
-        petLayer.contents = PlaceholderSprites.petImage(
-            action: state.action.rawValue,
+        let size = PetSprites.cellSize
+        petLayer.contents = PetSprites.image(
+            action: state.action,
             frame: state.frameIndex,
-            facing: state.facing == .right ? "right" : "left",
+            facing: state.facing,
             scale: backingScale
         )
-        // Anchor: horizontal center of sprite, bottom on ground.
-        let x = state.position.x - size.width/2
-        let y = state.position.y - size.height + 2
-        // Bob for active actions
-        let bob: CGFloat = (state.action == .walk || state.action == .dash) ? (state.frameIndex % 2 == 0 ? 0 : -1) : 0
-        petLayer.frame = CGRect(x: x, y: y + bob, width: size.width, height: size.height)
+        // Anchor: horizontal center of sprite, feet on the ground line. Hop
+        // frames lift the whole cell.
+        let lift = PetSprites.lift(action: state.action, frame: state.frameIndex)
+        let x = state.position.x - size.width / 2
+        let y = state.position.y - size.height - lift
+        petLayer.frame = CGRect(x: x, y: y, width: size.width, height: size.height)
     }
 
     // MARK: - Battery

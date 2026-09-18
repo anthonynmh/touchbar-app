@@ -262,7 +262,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         var resizedState = oldState
         resizedState.position.x = layout.petGroundX(
             fraction: Double(oldFraction),
-            spriteHalfWidth: 8
+            spriteHalfWidth: 12
         )
         resizedState.position.y = layout.regions.middle.maxY - 4
 
