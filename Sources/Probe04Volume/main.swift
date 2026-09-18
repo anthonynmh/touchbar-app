@@ -3,7 +3,6 @@
 // The probe changes every selected volume control, verifies the effective
 // volume and mute state, then restores and verifies every captured control.
 
-import AudioToolbox
 import CoreAudio
 import Foundation
 
@@ -42,24 +41,15 @@ func muteAddress(_ channel: UInt32) -> AudioObjectPropertyAddress {
                                mElement: channel)
 }
 
-func isVirtualMain(_ address: AudioObjectPropertyAddress) -> Bool {
-    address.mSelector == kAudioHardwareServiceDeviceProperty_VirtualMainVolume
-}
-
 func hasProperty(_ device: AudioDeviceID, _ address: AudioObjectPropertyAddress) -> Bool {
     var address = address
-    if isVirtualMain(address) {
-        return AudioHardwareServiceHasProperty(device, &address)
-    }
     return AudioObjectHasProperty(device, &address)
 }
 
 func isSettable(_ device: AudioDeviceID, _ address: AudioObjectPropertyAddress) -> Bool {
     var address = address
     var settable = DarwinBoolean(false)
-    let status = isVirtualMain(address)
-        ? AudioHardwareServiceIsPropertySettable(device, &address, &settable)
-        : AudioObjectIsPropertySettable(device, &address, &settable)
+    let status = AudioObjectIsPropertySettable(device, &address, &settable)
     return status == noErr && settable.boolValue
 }
 
@@ -84,9 +74,7 @@ func getVolume(_ device: AudioDeviceID, _ address: AudioObjectPropertyAddress) -
     var address = address
     var value: Float32 = 0
     var size = UInt32(MemoryLayout<Float32>.size)
-    let status = isVirtualMain(address)
-        ? AudioHardwareServiceGetPropertyData(device, &address, 0, nil, &size, &value)
-        : AudioObjectGetPropertyData(device, &address, 0, nil, &size, &value)
+    let status = AudioObjectGetPropertyData(device, &address, 0, nil, &size, &value)
     return (status, value)
 }
 
@@ -95,9 +83,7 @@ func setVolume(_ device: AudioDeviceID, _ address: AudioObjectPropertyAddress,
     var address = address
     var value = value
     let size = UInt32(MemoryLayout<Float32>.size)
-    return isVirtualMain(address)
-        ? AudioHardwareServiceSetPropertyData(device, &address, 0, nil, size, &value)
-        : AudioObjectSetPropertyData(device, &address, 0, nil, size, &value)
+    return AudioObjectSetPropertyData(device, &address, 0, nil, size, &value)
 }
 
 func getMute(_ device: AudioDeviceID, _ address: AudioObjectPropertyAddress) -> (OSStatus, Bool) {
@@ -117,15 +103,6 @@ func setMute(_ device: AudioDeviceID, _ address: AudioObjectPropertyAddress,
 }
 
 func discoverVolumes(_ device: AudioDeviceID) -> (strategy: String, controls: [VolumeControl]) {
-    let virtual = AudioObjectPropertyAddress(
-        mSelector: kAudioHardwareServiceDeviceProperty_VirtualMainVolume,
-        mScope: kAudioDevicePropertyScopeOutput,
-        mElement: kAudioObjectPropertyElementMain)
-    if hasProperty(device, virtual), isSettable(device, virtual) {
-        return ("virtual-main", [VolumeControl(address: virtual,
-                                                channel: kAudioObjectPropertyElementMain)])
-    }
-
     let main = volumeAddress(kAudioObjectPropertyElementMain)
     if hasProperty(device, main), isSettable(device, main) {
         return ("main", [VolumeControl(address: main,

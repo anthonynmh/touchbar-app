@@ -1,4 +1,3 @@
-import AudioToolbox
 import CoreAudio
 import Foundation
 
@@ -25,8 +24,8 @@ private final class VolumeListenerBox {
     init(_ handler: @escaping () -> Void) { self.handler = handler }
 }
 
-/// Public Core Audio implementation. Virtual main volume is preferred when it
-/// is present and writable; otherwise the device's preferred stereo scalar
+/// Public Core Audio implementation. The main output scalar is preferred when
+/// it is present and writable; otherwise the device's preferred stereo scalar
 /// controls are used. No AppleScript or synchronous shell process is involved
 /// in a drag.
 private final class SystemVolumeAudioBridge: VolumeAudioBridge {
@@ -100,25 +99,13 @@ private final class SystemVolumeAudioBridge: VolumeAudioBridge {
 
     func hasProperty(device: AudioDeviceID, address: AudioObjectPropertyAddress) -> Bool {
         var address = address
-        if isVirtualMain(address) {
-            return AudioHardwareServiceHasProperty(device, &address)
-        }
         return AudioObjectHasProperty(device, &address)
-    }
-
-    private func isVirtualMain(_ address: AudioObjectPropertyAddress) -> Bool {
-        address.mSelector == kAudioHardwareServiceDeviceProperty_VirtualMainVolume
     }
 
     func isPropertySettable(device: AudioDeviceID, address: AudioObjectPropertyAddress) -> Bool {
         var address = address
         var settable = DarwinBoolean(false)
-        let status: OSStatus
-        if isVirtualMain(address) {
-            status = AudioHardwareServiceIsPropertySettable(device, &address, &settable)
-        } else {
-            status = AudioObjectIsPropertySettable(device, &address, &settable)
-        }
+        let status = AudioObjectIsPropertySettable(device, &address, &settable)
         return status == noErr && settable.boolValue
     }
 
@@ -140,12 +127,7 @@ private final class SystemVolumeAudioBridge: VolumeAudioBridge {
         var address = address
         var value: Float32 = 0
         var size = UInt32(MemoryLayout<Float32>.size)
-        let status: OSStatus
-        if isVirtualMain(address) {
-            status = AudioHardwareServiceGetPropertyData(device, &address, 0, nil, &size, &value)
-        } else {
-            status = AudioObjectGetPropertyData(device, &address, 0, nil, &size, &value)
-        }
+        let status = AudioObjectGetPropertyData(device, &address, 0, nil, &size, &value)
         return (status, value)
     }
 
@@ -153,9 +135,6 @@ private final class SystemVolumeAudioBridge: VolumeAudioBridge {
         var address = address
         var value = value
         let size = UInt32(MemoryLayout<Float32>.size)
-        if isVirtualMain(address) {
-            return AudioHardwareServiceSetPropertyData(device, &address, 0, nil, size, &value)
-        }
         return AudioObjectSetPropertyData(device, &address, 0, nil, size, &value)
     }
 
@@ -240,18 +219,12 @@ public final class RealVolumeProvider: VolumeProvider {
         }
         currentDevice = device
 
-        let virtual = virtualMasterAddress()
-        if bridge.hasProperty(device: device, address: virtual),
-           bridge.isPropertySettable(device: device, address: virtual) {
-            volumeAddresses = [virtual]
+        let main = volumeAddress(element: kAudioObjectPropertyElementMain)
+        if bridge.hasProperty(device: device, address: main),
+           bridge.isPropertySettable(device: device, address: main) {
+            volumeAddresses = [main]
         } else {
-            let main = volumeAddress(element: kAudioObjectPropertyElementMain)
-            if bridge.hasProperty(device: device, address: main),
-               bridge.isPropertySettable(device: device, address: main) {
-                volumeAddresses = [main]
-            } else {
-                volumeAddresses = discoverStereoVolumeAddresses(device: device)
-            }
+            volumeAddresses = discoverStereoVolumeAddresses(device: device)
         }
 
         guard !volumeAddresses.isEmpty else {
@@ -498,11 +471,5 @@ public final class RealVolumeProvider: VolumeProvider {
         AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyMute,
                                    mScope: kAudioDevicePropertyScopeOutput,
                                    mElement: element)
-    }
-
-    private func virtualMasterAddress() -> AudioObjectPropertyAddress {
-        AudioObjectPropertyAddress(mSelector: kAudioHardwareServiceDeviceProperty_VirtualMainVolume,
-                                   mScope: kAudioDevicePropertyScopeOutput,
-                                   mElement: kAudioObjectPropertyElementMain)
     }
 }

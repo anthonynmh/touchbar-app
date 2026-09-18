@@ -1,13 +1,12 @@
-import AudioToolbox
 import CoreAudio
 import XCTest
 @testable import SnappyNestCore
 
 final class RealVolumeProviderTests: XCTestCase {
-    func testPrefersWritableVirtualMainVolume() {
+    func testPrefersWritableMainVolumeOverStereoChannels() {
         let bridge = FakeVolumeAudioBridge()
-        bridge.virtualVolume = 0.35
-        bridge.virtualSettable = true
+        bridge.scalarVolumes[kAudioObjectPropertyElementMain] = 0.35
+        bridge.scalarSettableChannels.insert(kAudioObjectPropertyElementMain)
         let provider = RealVolumeProvider(bridge: bridge)
 
         XCTAssertEqual(provider.capability, .supported)
@@ -15,12 +14,14 @@ final class RealVolumeProviderTests: XCTestCase {
         provider.set(0.72)
         XCTAssertEqual(provider.value, 0.72, accuracy: 0.001)
         XCTAssertEqual(bridge.setVolumeChannels, [kAudioObjectPropertyElementMain])
+        XCTAssertEqual(bridge.scalarVolumes[1], 0.3)
+        XCTAssertEqual(bridge.scalarVolumes[2], 0.3)
     }
 
     func testUsesDeduplicatedPreferredStereoChannels() {
         let bridge = FakeVolumeAudioBridge()
         bridge.preferredChannels = [4, 4, 6]
-        bridge.scalarVolumes = [4: 0.2, 6: 0.4]
+        bridge.scalarVolumes = [kAudioObjectPropertyElementMain: 0.9, 4: 0.2, 6: 0.4]
         bridge.scalarSettableChannels = [4, 6]
         bridge.mutes = [:]
         let provider = RealVolumeProvider(bridge: bridge)
@@ -98,6 +99,19 @@ final class RealVolumeProviderTests: XCTestCase {
         XCTAssertEqual(bridge.scalarVolumes[1] ?? -1, 0.2, accuracy: 0.001)
         XCTAssertEqual(bridge.scalarVolumes[2] ?? -1, 0.3, accuracy: 0.001)
         XCTAssertTrue(provider.isMuted)
+        XCTAssertEqual(provider.value, 0.25, accuracy: 0.001)
+    }
+
+    func testVolumeReadbackFailureRollsBackEveryChangedVolume() {
+        let bridge = FakeVolumeAudioBridge()
+        bridge.scalarVolumes = [1: 0.2, 2: 0.3]
+        bridge.failFirstVolumeReadAfterWriteForChannels = [2]
+        let provider = RealVolumeProvider(bridge: bridge)
+
+        provider.set(0.8)
+
+        XCTAssertEqual(bridge.scalarVolumes[1] ?? -1, 0.2, accuracy: 0.001)
+        XCTAssertEqual(bridge.scalarVolumes[2] ?? -1, 0.3, accuracy: 0.001)
         XCTAssertEqual(provider.value, 0.25, accuracy: 0.001)
     }
 
@@ -196,8 +210,6 @@ final class RealVolumeProviderTests: XCTestCase {
 
 private final class FakeVolumeAudioBridge: VolumeAudioBridge {
     var device: AudioDeviceID? = 42
-    var virtualVolume: Float32 = 0.5
-    var virtualSettable = false
     var preferredStatus: OSStatus = noErr
     var preferredChannels: [UInt32] = [1, 2]
     var scalarVolumes: [UInt32: Float32] = [1: 0.3, 2: 0.3]
@@ -205,6 +217,7 @@ private final class FakeVolumeAudioBridge: VolumeAudioBridge {
     var mutes: [UInt32: Bool] = [kAudioObjectPropertyElementMain: false]
     var muteSettableChannels: Set<UInt32> = [kAudioObjectPropertyElementMain]
     var failVolumeWritesForChannels: Set<UInt32> = []
+    var failFirstVolumeReadAfterWriteForChannels: Set<UInt32> = []
     var failMuteWritesForChannels: Set<UInt32> = []
     var setVolumeChannels: [UInt32] = []
     var setMuteOperations: [(channel: UInt32, muted: Bool)] = []
@@ -214,6 +227,8 @@ private final class FakeVolumeAudioBridge: VolumeAudioBridge {
     private var nextToken = 1
     private var listeners: [Int: () -> Void] = [:]
     private var defaultListener: (() -> Void)?
+    private var pendingVolumeReadFailures: Set<UInt32> = []
+    private var injectedVolumeReadFailures: Set<UInt32> = []
 
     func defaultOutputDevice() -> AudioDeviceID? { device }
 
@@ -243,8 +258,6 @@ private final class FakeVolumeAudioBridge: VolumeAudioBridge {
 
     func hasProperty(device: AudioDeviceID, address: AudioObjectPropertyAddress) -> Bool {
         switch address.mSelector {
-        case kAudioHardwareServiceDeviceProperty_VirtualMainVolume:
-            return true
         case kAudioDevicePropertyVolumeScalar:
             return scalarVolumes[address.mElement] != nil
         case kAudioDevicePropertyMute:
@@ -256,8 +269,6 @@ private final class FakeVolumeAudioBridge: VolumeAudioBridge {
 
     func isPropertySettable(device: AudioDeviceID, address: AudioObjectPropertyAddress) -> Bool {
         switch address.mSelector {
-        case kAudioHardwareServiceDeviceProperty_VirtualMainVolume:
-            return virtualSettable
         case kAudioDevicePropertyVolumeScalar:
             return scalarSettableChannels.contains(address.mElement)
         case kAudioDevicePropertyMute:
@@ -272,8 +283,8 @@ private final class FakeVolumeAudioBridge: VolumeAudioBridge {
     }
 
     func getVolume(device: AudioDeviceID, address: AudioObjectPropertyAddress) -> (OSStatus, Float32) {
-        if address.mSelector == kAudioHardwareServiceDeviceProperty_VirtualMainVolume {
-            return (noErr, virtualVolume)
+        if pendingVolumeReadFailures.remove(address.mElement) != nil {
+            return (kAudioHardwareUnspecifiedError, 0)
         }
         guard let volume = scalarVolumes[address.mElement] else {
             return (kAudioHardwareUnspecifiedError, 0)
@@ -282,14 +293,13 @@ private final class FakeVolumeAudioBridge: VolumeAudioBridge {
     }
 
     func setVolume(device: AudioDeviceID, address: AudioObjectPropertyAddress, value: Float32) -> OSStatus {
-        let channel = address.mSelector == kAudioHardwareServiceDeviceProperty_VirtualMainVolume
-            ? kAudioObjectPropertyElementMain : address.mElement
+        let channel = address.mElement
         setVolumeChannels.append(channel)
         if failVolumeWritesForChannels.contains(channel) { return kAudioHardwareUnspecifiedError }
-        if address.mSelector == kAudioHardwareServiceDeviceProperty_VirtualMainVolume {
-            virtualVolume = value
-        } else {
-            scalarVolumes[channel] = value
+        scalarVolumes[channel] = value
+        if failFirstVolumeReadAfterWriteForChannels.contains(channel),
+           injectedVolumeReadFailures.insert(channel).inserted {
+            pendingVolumeReadFailures.insert(channel)
         }
         return noErr
     }
