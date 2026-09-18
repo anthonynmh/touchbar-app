@@ -61,6 +61,15 @@ same notes. Keep all content here; do not duplicate it in `CLAUDE.md`.
 - The sky image is regenerated only when the minute changes
   (`SkyPainter.Key`); everything else is a cached per-state glyph, so a frame
   costs only layer `contents` swaps.
+- Paging is a camera: the world and controls containers are full-width
+  `CALayer`s whose `position.x` follows an `NSPanGestureRecognizer`
+  (`allowedTouchTypes = .direct`) and snaps with a `CABasicAnimation`. The
+  same recognizer scrubs a slider when the drag starts on a live track, so
+  hit-testing decides slider-vs-pan at `.began`, never mid-gesture. Verified
+  on hardware 2026-09-18: the scene follows the finger, snaps cleanly, and
+  the sliders still scrub.
+- Users found a tap-to-toggle tab and a translucent control panel broke the
+  immersion; the controls must sit in the same sky and terrain as the pet.
 
 ## Volume control findings
 
@@ -143,4 +152,9 @@ same notes. Keep all content here; do not duplicate it in `CLAUDE.md`.
   and set at the right of the middle region; tap-to-reveal clock; battery
   glyph with percentage; filled sliders with icons. Progress-follow remains the
   top-priority pet mode. Snapshot tests (`SNAPPY_SNAPSHOT_DIR`) render review
-  PNGs; hardware verification recorded below when performed.
+  PNGs. Verified on hardware: pet, taps, clock reveal, sliders, battery.
+- 2026-09-18 — Replaced the fixed left/right UI columns with a two-page camera
+  (world ↔ controls) panned by dragging the scene; a first tab-toggle version
+  was rejected as "collapsible", and a translucent panel behind the controls
+  was rejected for breaking immersion. The final controls page is a compact
+  centered cluster over continuous terrain. Verified on hardware.

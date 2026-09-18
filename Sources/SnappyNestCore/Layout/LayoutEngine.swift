@@ -30,12 +30,12 @@ public struct LayoutEngine: Equatable {
         public let battery: CGRect      // rightmost control
     }
 
-    /// Horizontal padding at both ends of the controls page.
-    public static let controlsInset: CGFloat = 10
-    /// Battery cell: glyph + percentage label.
-    public static let batteryShareOfRight: CGFloat = 0.10
-    public static let minimumBatteryWidth: CGFloat = 72
-    public static let playPauseShareOfRight: CGFloat = 0.06
+    /// The controls page is a compact cluster centered on the strip so the
+    /// scenery stays visible around it.
+    public static let maximumSliderWidth: CGFloat = 180
+    public static let playPauseWidth: CGFloat = 44
+    public static let batteryWidth: CGFloat = 72
+    public static let controlGap: CGFloat = 14
     /// Minimum touch-target width in points. Regions never shrink below this,
     /// even if the strip is measured smaller than expected.
     public static let minimumControlWidth: CGFloat = 30
@@ -69,15 +69,17 @@ public struct LayoutEngine: Equatable {
                 right: .null, brightness: .null, volume: .null, playPause: .null, battery: .null
             )
         case .controls:
-            let inset = min(LayoutEngine.controlsInset, w / 10)
-            let right = CGRect(x: x + inset, y: y, width: w - 2 * inset, height: h)
-            let batteryW = min(right.width / 2, max(LayoutEngine.minimumBatteryWidth, right.width * LayoutEngine.batteryShareOfRight))
-            let playW = min(right.width / 4, max(LayoutEngine.minimumControlWidth + 10, right.width * LayoutEngine.playPauseShareOfRight))
-            let sliderW = max(LayoutEngine.minimumControlWidth, (right.width - batteryW - playW) / 2)
-            let brightness = CGRect(x: right.minX, y: y, width: sliderW, height: h)
-            let volume = CGRect(x: brightness.maxX, y: y, width: sliderW, height: h)
-            let playPause = CGRect(x: volume.maxX, y: y, width: playW, height: h)
-            let battery = CGRect(x: playPause.maxX, y: y, width: max(0, right.maxX - playPause.maxX), height: h)
+            let gap = LayoutEngine.controlGap
+            let fixed = LayoutEngine.playPauseWidth + LayoutEngine.batteryWidth + 3 * gap
+            let sliderW = max(LayoutEngine.minimumControlWidth,
+                              min(LayoutEngine.maximumSliderWidth, (w - fixed) / 2))
+            let clusterW = 2 * sliderW + fixed
+            let startX = x + max(0, (w - clusterW) / 2)
+            let right = CGRect(x: startX, y: y, width: clusterW, height: h)
+            let brightness = CGRect(x: startX, y: y, width: sliderW, height: h)
+            let volume = CGRect(x: brightness.maxX + gap, y: y, width: sliderW, height: h)
+            let playPause = CGRect(x: volume.maxX + gap, y: y, width: LayoutEngine.playPauseWidth, height: h)
+            let battery = CGRect(x: playPause.maxX + gap, y: y, width: LayoutEngine.batteryWidth, height: h)
             return Regions(
                 page: .controls, full: bounds, sky: bounds, middle: .null,
                 right: right, brightness: brightness, volume: volume, playPause: playPause, battery: battery

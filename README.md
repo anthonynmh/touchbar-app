@@ -1,11 +1,11 @@
 # Snappy Nest — a native Touch Bar world for the M1 13" MacBook Pro
 
-A single-screen pixel-art world that lives on the Touch Bar: a live sky that follows
-the local time of day (dawn glow, blue noon, starry night) with the sun and moon
-crossing the middle region, an orange cat-like pet that roams, reacts to taps, and
-walks where you tap, a battery glyph with percentage on the left, and directly-draggable
-brightness + volume + contextual play/pause on the right. Tap the sun or moon to see
-the time.
+A pixel-art world that lives on the Touch Bar: a live sky that follows the local
+time of day (dawn glow, blue noon, starry night) with the sun and moon crossing the
+strip, and an orange cat-like pet that roams, reacts to taps, and walks where you
+tap. Tap the sun or moon to see the time. Swipe the scene left to pan to the
+controls — brightness, volume, play/pause and battery sit in the same landscape —
+and swipe back (or wait ten seconds) to return to the pet.
 
 Local-only. No cloud, no telemetry, no microphone, and no network code. Works
 fully offline. The current local build is not App-Sandboxed.
@@ -118,13 +118,21 @@ Current build (`v0.1.0-dev`), verified on this Mac on 2026-09-18:
   known position is playing.
 - ✅ Layer-backed `SceneRenderer` at nearest-neighbor filtering,
   measured-bounds pixel-alignment (2× on this Mac).
+- ✅ Two-page strip: the world and, to its right, a compact controls cluster
+  over the same sky and continuous terrain. A horizontal drag anywhere that is
+  not a live slider pans the camera with the finger; release snaps to the
+  nearer page and a flick commits either way. The controls page pans back to
+  the world after ten idle seconds (`AppDelegate.controlsIdleTimeout`).
 - ✅ Battery glyph with proportional fill (green / amber / red), a drawn charging
-  bolt, and a percentage label, fed from IOPS.
+  bolt, and a percentage label at the far right of the controls page, fed from
+  IOPS.
 - ✅ Directly-draggable brightness (`DisplayServices`) and volume (Core Audio),
   including preferred-stereo fallback, mute handling, confirmed readback, and
   rollback after partial write failure. Sliders show a filled track, a large
   knob, and sun/speaker icons whose arcs follow the level; mute shows a slash.
 - ✅ Contextual play/pause button (circle glyph); toggles the active media source.
+- ✅ `LayoutEngine.Page` models the pages; the pet always uses the world layout
+  so playback progress-follow and roaming are unaffected by which page shows.
 - ✅ Pet state machine (12 actions) with seeded, hour-of-day-weighted
   free-roam scheduler; progress-follow mode when duration+position are
   known; **battery is not a scheduler input** (enforced by types + test).
@@ -171,8 +179,8 @@ touchbar-pet/
     Probe04Volume/             # Core Audio roundtrip
     Probe05Media/              # Spotify + MediaRemote adapters
   Tests/
-    SnappyNestCoreTests/       # 84 model/provider XCTest cases
-    SnappyNestUITests/         # 20 renderer/presenter/snapshot XCTest cases
+    SnappyNestCoreTests/       # 83 model/provider XCTest cases
+    SnappyNestUITests/         # 24 renderer/presenter/snapshot XCTest cases
   Install/
     install.sh   uninstall.sh   clean.sh   wrap-as-app.sh   run-probe.sh
   Makefile
@@ -287,7 +295,7 @@ simulation panel for clock / battery / playback. All state will persist to
 
 ## Testing
 
-- `swift test` runs 104 tests: 84 core/provider tests and 20 UI/presenter tests
+- `swift test` runs 107 tests: 83 core/provider tests and 24 UI/presenter tests
   (three snapshot tests are skipped unless `SNAPPY_SNAPSHOT_DIR` is set).
 - `SNAPPY_SNAPSHOT_DIR=/some/dir swift test --filter SceneSnapshotTests` writes
   PNGs of the pet clip sheet, the battery/control glyphs, and the full strip at
@@ -306,7 +314,8 @@ simulation panel for clock / battery / playback. All state will persist to
   is genuinely skipped.
 - Renderer smoke test: launch the app, open **Enlarged Preview…**, verify
   the pet, celestial body, and controls render at 6×. On hardware, tap the pet
-  (reaction), tap the ground (walk-to), and tap the sun/moon (clock).
+  (reaction), tap the ground (walk-to), tap the sun/moon (clock), and swipe
+  left/right to pan between the world and the controls.
 
 ## Troubleshooting
 

@@ -108,17 +108,24 @@ public enum SkyPainter {
 
     /// Hills and grass for the world's middle region, drawn at the origin of
     /// a bitmap `size` wide (the layer is placed at the region's frame).
-    public static func terrain(size: CGSize, time: WorldTime, scale: CGFloat) -> CGImage {
+    ///
+    /// `xOffset` shifts the hill phase and the tuft seed so a second terrain
+    /// placed to the right continues the ridge line instead of repeating it.
+    public static func terrain(size: CGSize, time: WorldTime, scale: CGFloat, xOffset: CGFloat = 0) -> CGImage {
         PetSprites.render(size: size, scale: scale) { ctx in
             ctx.setShouldAntialias(true)
             let m = CGRect(origin: .zero, size: size)
+            ctx.saveGState()
+            ctx.translateBy(x: -xOffset, y: 0)
+            let shifted = m.offsetBy(dx: xOffset, dy: 0)
             let (_, horizon) = skyColors(at: time)
             let night = 1 - time.daylight
 
             let farHill = horizon.mix(RGB(0x2F6B3A), 0.45).scaled(0.75 - 0.35 * night)
             let nearHill = horizon.mix(RGB(0x2A5A32), 0.6).scaled(0.6 - 0.3 * night)
-            drawHills(ctx, in: m, baseY: groundY + 2, crest: horizonY, amplitude: 3.5, frequency: 0.045, phase: 0.8, color: farHill.cg())
-            drawHills(ctx, in: m, baseY: groundY + 2, crest: horizonY + 3, amplitude: 2.5, frequency: 0.08, phase: 2.9, color: nearHill.cg())
+            drawHills(ctx, in: shifted, baseY: groundY + 2, crest: horizonY, amplitude: 3.5, frequency: 0.045, phase: 0.8, color: farHill.cg())
+            drawHills(ctx, in: shifted, baseY: groundY + 2, crest: horizonY + 3, amplitude: 2.5, frequency: 0.08, phase: 2.9, color: nearHill.cg())
+            ctx.restoreGState()
 
             // Ground: grass gradient with a darker soil line at the bottom.
             let grassTop = RGB(0x5E9C43).mix(RGB(0x1F3526), night)
@@ -129,7 +136,7 @@ public enum SkyPainter {
             ctx.fill(CGRect(x: 0, y: m.maxY - 2, width: m.width, height: 2))
 
             // Grass tufts, seeded.
-            var tufts = SeededRandom(seed: 0x6A55)
+            var tufts = SeededRandom(seed: 0x6A55 &+ UInt64(max(0, xOffset)))
             ctx.setFillColor(grassTop.scaled(1.25).cg())
             for _ in 0..<Int(m.width / 14) {
                 let x = CGFloat(tufts.nextDouble()) * m.width

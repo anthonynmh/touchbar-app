@@ -16,22 +16,19 @@ final class LayoutEngineTests: XCTestCase {
         XCTAssertFalse(r.brightness.contains(CGPoint(x: 500, y: 15)))
     }
 
-    func testControlsPageOrdersSlidersPlayPauseBattery() {
+    func testControlsPageIsACenteredClusterOrderedSlidersPlayPauseBattery() {
         let r = LayoutEngine(bounds: touchBarBounds, backingScale: 2.0, page: .controls).regions
         XCTAssertEqual(r.page, .controls)
-        XCTAssertEqual(r.right.minX, r.full.minX + LayoutEngine.controlsInset, accuracy: 1e-6)
         XCTAssertEqual(r.brightness.minX, r.right.minX, accuracy: 1e-6)
-        XCTAssertEqual(r.volume.minX, r.brightness.maxX, accuracy: 1e-6)
-        XCTAssertEqual(r.playPause.minX, r.volume.maxX, accuracy: 1e-6)
-        XCTAssertEqual(r.battery.minX, r.playPause.maxX, accuracy: 1e-6)
+        XCTAssertGreaterThan(r.volume.minX, r.brightness.maxX)
+        XCTAssertGreaterThan(r.playPause.minX, r.volume.maxX)
+        XCTAssertGreaterThan(r.battery.minX, r.playPause.maxX)
         XCTAssertEqual(r.battery.maxX, r.right.maxX, accuracy: 1e-6)
-        XCTAssertEqual(
-            r.brightness.width + r.volume.width + r.playPause.width + r.battery.width,
-            r.right.width, accuracy: 1e-6
-        )
-        XCTAssertTrue(r.middle.isNull)
-        XCTAssertGreaterThanOrEqual(r.battery.width, LayoutEngine.minimumBatteryWidth - 1e-6)
+        XCTAssertEqual(r.right.midX, r.full.midX, accuracy: 1e-6)
+        XCTAssertEqual(r.brightness.width, LayoutEngine.maximumSliderWidth, accuracy: 1e-6)
         XCTAssertEqual(r.brightness.width, r.volume.width, accuracy: 1e-6)
+        XCTAssertEqual(r.battery.width, LayoutEngine.batteryWidth, accuracy: 1e-6)
+        XCTAssertTrue(r.middle.isNull)
     }
 
     func testSkySpansFullWidthOnBothPages() {
@@ -46,6 +43,7 @@ final class LayoutEngineTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(r.brightness.width, LayoutEngine.minimumControlWidth - 1e-6)
         XCTAssertGreaterThanOrEqual(r.volume.width, LayoutEngine.minimumControlWidth - 1e-6)
         XCTAssertGreaterThan(r.battery.width, 0)
+        XCTAssertEqual(r.right.minX, 0, accuracy: 1e-6, "cluster never starts off-strip")
     }
 
     func testPetGroundXUsesTheWorldPageOnEitherPage() {

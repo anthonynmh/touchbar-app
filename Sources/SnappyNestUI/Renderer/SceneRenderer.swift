@@ -25,7 +25,7 @@ public final class SceneRenderer: NSView {
     private let clockTextLayer = CATextLayer()
 
     private let controlsContainer = CALayer()
-    private let controlsPanelLayer = CALayer()
+    private let controlsTerrainLayer = CALayer()
     private let batteryGlyphLayer = CALayer()
     private let batteryTextLayer = CATextLayer()
     private let brightnessIconLayer = CALayer()
@@ -41,6 +41,7 @@ public final class SceneRenderer: NSView {
     private var backingScale: CGFloat = 2.0
     private var cachedSky: (key: SkyPainter.Key, image: CGImage)?
     private var cachedTerrain: (key: SkyPainter.Key, image: CGImage)?
+    private var cachedControlsTerrain: (key: SkyPainter.Key, image: CGImage)?
     private var currentModel: SceneModel?
     /// Camera over the two pages: 0 shows the world, `full.width` shows the
     /// controls. Dragging the scene moves it; releasing snaps to a page.
@@ -91,6 +92,7 @@ public final class SceneRenderer: NSView {
         applyContentsScale(to: layer)
         cachedSky = nil
         cachedTerrain = nil
+        cachedControlsTerrain = nil
         if let m = currentModel { update(model: m) }
     }
 
@@ -98,6 +100,7 @@ public final class SceneRenderer: NSView {
         super.layout()
         cachedSky = nil
         cachedTerrain = nil
+        cachedControlsTerrain = nil
         if let m = currentModel { update(model: m) }
     }
 
@@ -118,7 +121,7 @@ public final class SceneRenderer: NSView {
             clockPillLayer
         ]
         let controlLayers: [CALayer] = [
-            controlsPanelLayer,
+            controlsTerrainLayer,
             brightnessIconLayer, brightnessTrackLayer, brightnessFillLayer, brightnessKnob,
             volumeIconLayer, volumeTrackLayer, volumeFillLayer, volumeKnob,
             playPauseLayer, batteryGlyphLayer, batteryTextLayer
@@ -135,7 +138,6 @@ public final class SceneRenderer: NSView {
         worldLayers.forEach { worldContainer.addSublayer($0) }
         controlLayers.forEach { controlsContainer.addSublayer($0) }
         for c in [worldContainer, controlsContainer] { c.anchorPoint = .zero }
-        controlsPanelLayer.backgroundColor = Palette.controlBg
 
         clockPillLayer.addSublayer(clockTextLayer)
         clockPillLayer.isHidden = true
@@ -146,18 +148,18 @@ public final class SceneRenderer: NSView {
         progressTrailLayer.lineCap = .round
 
         for track in [brightnessTrackLayer, volumeTrackLayer] {
-            track.strokeColor = CGColor(gray: 1, alpha: 0.18)
-            track.lineWidth = 4
+            track.strokeColor = Palette.brown.copy(alpha: 0.55)
+            track.lineWidth = 5
             track.lineCap = .round
             track.fillColor = nil
         }
         for fill in [brightnessFillLayer, volumeFillLayer] {
-            fill.lineWidth = 4
+            fill.lineWidth = 3
             fill.lineCap = .round
             fill.fillColor = nil
         }
         for knob in [brightnessKnob, volumeKnob] {
-            knob.cornerRadius = 3
+            knob.cornerRadius = 4
             knob.borderWidth = 1
             knob.borderColor = Palette.brown
         }
@@ -212,7 +214,7 @@ public final class SceneRenderer: NSView {
         paintProgressTrail(regions: world, fraction: model.progressFraction)
         paintPet(state: model.pet, regions: world)
         paintClock(model: model, regions: world)
-        controlsPanelLayer.frame = controls.full
+        paintControlsTerrain(regions: controls, time: model.time)
         paintBattery(model.battery, regions: controls)
         paintBrightness(value: model.brightness, available: model.brightnessAvailable, regions: controls)
         paintVolume(value: model.volume, muted: model.volumeMuted, available: model.volumeAvailable, regions: controls)
@@ -319,6 +321,17 @@ public final class SceneRenderer: NSView {
             cachedTerrain = (key, SkyPainter.terrain(size: regions.middle.size, time: time, scale: backingScale))
         }
         terrainLayer.contents = cachedTerrain?.image
+    }
+
+    private func paintControlsTerrain(regions: LayoutEngine.Regions, time: WorldTime) {
+        controlsTerrainLayer.frame = regions.full
+        controlsTerrainLayer.magnificationFilter = .linear
+        let key = SkyPainter.Key(time: time, size: regions.full.size, scale: backingScale)
+        if cachedControlsTerrain?.key != key {
+            cachedControlsTerrain = (key, SkyPainter.terrain(size: regions.full.size, time: time,
+                                                             scale: backingScale, xOffset: regions.full.width))
+        }
+        controlsTerrainLayer.contents = cachedControlsTerrain?.image
     }
 
     // MARK: - Celestial
@@ -496,7 +509,7 @@ public final class SceneRenderer: NSView {
         fill.isHidden = !active
 
         knob.backgroundColor = active ? Palette.cream : Palette.unavailableTint
-        knob.frame = CGRect(x: (max(trackStart, knobX) - 5).rounded(), y: r.midY - 7, width: 10, height: 14)
+        knob.frame = CGRect(x: (max(trackStart, knobX) - 4.5).rounded(), y: r.midY - 6.5, width: 9, height: 13)
     }
 
     private func paintBrightness(value: Double, available: Bool, regions: LayoutEngine.Regions) {
