@@ -59,6 +59,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         renderer.onBrightnessChange = { [weak self] v in self?.brightness.set(v) }
         renderer.onVolumeChange     = { [weak self] v in self?.volume.set(v) }
         renderer.onTogglePlayPause  = { [weak self] in self?.activeSource().togglePlayPause() }
+        renderer.onPetTap = { [weak self] in
+            guard let self else { return }
+            self.pet.tapPet(now: self.clock.now)
+            self.renderOnce()
+        }
+        renderer.onGroundTap = { [weak self] x in
+            guard let self else { return }
+            self.pet.walkTo(x: x, now: self.clock.now)
+            self.renderOnce()
+        }
 
         installMenuBar()
         installPresenter()

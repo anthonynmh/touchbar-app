@@ -43,6 +43,49 @@ final class SceneSnapshotTests: XCTestCase {
         try write(image, to: dir.appendingPathComponent("pet-clips.png"))
     }
 
+    func testWriteGlyphSheet() throws {
+        guard let dir = outputDir else { throw XCTSkip("SNAPPY_SNAPSHOT_DIR not set") }
+        let batteries: [BatterySnapshot] = [
+            BatterySnapshot(isPresent: true, percentage: 0.0, isCharging: false),
+            BatterySnapshot(isPresent: true, percentage: 0.12, isCharging: false),
+            BatterySnapshot(isPresent: true, percentage: 0.3, isCharging: true),
+            BatterySnapshot(isPresent: true, percentage: 0.5, isCharging: false),
+            BatterySnapshot(isPresent: true, percentage: 1.0, isCharging: true),
+            .unavailable
+        ]
+        let controls: [CGImage] = [
+            ControlGlyphs.brightness(available: true, scale: scale),
+            ControlGlyphs.brightness(available: false, scale: scale),
+            ControlGlyphs.volume(level: 0, muted: false, available: true, scale: scale),
+            ControlGlyphs.volume(level: 0.3, muted: false, available: true, scale: scale),
+            ControlGlyphs.volume(level: 0.8, muted: false, available: true, scale: scale),
+            ControlGlyphs.volume(level: 0.8, muted: true, available: true, scale: scale),
+            ControlGlyphs.volume(level: 0.8, muted: false, available: false, scale: scale),
+            ControlGlyphs.playPause(isPlaying: true, scale: scale),
+            ControlGlyphs.playPause(isPlaying: false, scale: scale)
+        ]
+        let sheet = CGSize(width: 32 * CGFloat(max(batteries.count, controls.count)), height: 64)
+        let image = PetSprites.render(size: sheet, scale: scale * 3) { ctx in
+            ctx.setFillColor(CGColor(gray: 0.25, alpha: 1))
+            ctx.fill(CGRect(origin: .zero, size: sheet))
+            func blit(_ img: CGImage, at origin: CGPoint) {
+                let size = CGSize(width: CGFloat(img.width) / scale, height: CGFloat(img.height) / scale)
+                ctx.saveGState()
+                ctx.translateBy(x: origin.x, y: origin.y + size.height)
+                ctx.scaleBy(x: 1, y: -1)
+                ctx.draw(img, in: CGRect(origin: .zero, size: size))
+                ctx.restoreGState()
+            }
+            for (i, b) in batteries.enumerated() {
+                blit(BatteryGlyph.image(snapshot: b, scale: scale), at: CGPoint(x: 2 + 32 * CGFloat(i), y: 8))
+            }
+            for (i, c) in controls.enumerated() {
+                blit(c, at: CGPoint(x: 2 + 32 * CGFloat(i), y: 36))
+            }
+        }
+        try write(image, to: dir.appendingPathComponent("glyphs.png"))
+    }
+
     func testWriteSceneAtSeveralHours() throws {
         guard let dir = outputDir else { throw XCTSkip("SNAPPY_SNAPSHOT_DIR not set") }
         let layout = LayoutEngine(bounds: bounds, backingScale: scale)
@@ -78,7 +121,10 @@ final class SceneSnapshotTests: XCTestCase {
         let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 4 * w,
                             space: CGColorSpaceCreateDeviceRGB(),
                             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
-        ctx.scaleBy(x: scale, y: scale)
+        // The view is flipped; CALayer.render(in:) applies that flip, so undo
+        // it here to capture what the Touch Bar actually shows.
+        ctx.translateBy(x: 0, y: CGFloat(h))
+        ctx.scaleBy(x: scale, y: -scale)
         view.layer!.render(in: ctx)
         return try XCTUnwrap(ctx.makeImage())
     }

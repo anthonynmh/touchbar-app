@@ -1,131 +1,137 @@
 import AppKit
 import CoreGraphics
 
-/// Procedurally rendered CGImages for the placeholder art. Ships now so we
-/// can validate the pipeline end-to-end; a real sprite-atlas system replaces
-/// these calls without touching renderer or state-machine code.
-///
-/// Labeled `placeholder: true` in log output.
+/// Procedurally rendered scenery: the sun, the moon, and the ground props.
+/// Cells are drawn in flipped (y-down) coordinates like the pet.
 public enum PlaceholderSprites {
-    public static let cellSize = CGSize(width: 32, height: 32)
+    public static let sunSize = CGSize(width: 18, height: 18)
+    public static let moonSize = CGSize(width: 16, height: 16)
+    public static let propSize = CGSize(width: 14, height: 14)
 
-    public static func petImage(action: String, frame: Int, facing: String, scale: CGFloat) -> CGImage {
-        return image(size: cellSize, scale: scale) { ctx in
-            drawPet(ctx: ctx, action: action, frame: frame, facing: facing, size: cellSize)
-        }
-    }
+    private static var cache: [String: CGImage] = [:]
 
     public static func sunImage(scale: CGFloat) -> CGImage {
-        return image(size: CGSize(width: 14, height: 14), scale: scale) { ctx in
-            ctx.setFillColor(Palette.golden); ctx.fillEllipse(in: CGRect(x: 1, y: 1, width: 12, height: 12))
-            ctx.setFillColor(Palette.cream);  ctx.fillEllipse(in: CGRect(x: 3, y: 3, width: 8, height: 8))
+        cached("sun@\(scale)") {
+            PetSprites.render(size: sunSize, scale: scale) { ctx in
+                ctx.setShouldAntialias(true)
+                ctx.setFillColor(Palette.golden.copy(alpha: 0.18) ?? Palette.golden)
+                ctx.fillEllipse(in: CGRect(x: 0, y: 0, width: 18, height: 18))
+                ctx.setFillColor(Palette.golden.copy(alpha: 0.35) ?? Palette.golden)
+                ctx.fillEllipse(in: CGRect(x: 2, y: 2, width: 14, height: 14))
+                ctx.setFillColor(Palette.golden)
+                ctx.fillEllipse(in: CGRect(x: 4, y: 4, width: 10, height: 10))
+                ctx.setFillColor(CGColor(red: 1, green: 0.95, blue: 0.75, alpha: 1))
+                ctx.fillEllipse(in: CGRect(x: 5.5, y: 5.5, width: 6, height: 6))
+            }
         }
     }
 
     public static func moonImage(scale: CGFloat) -> CGImage {
-        return image(size: CGSize(width: 12, height: 12), scale: scale) { ctx in
-            ctx.setFillColor(Palette.cream)
-            ctx.fillEllipse(in: CGRect(x: 0, y: 0, width: 12, height: 12))
-            ctx.setFillColor(CGColor(gray: 0.2, alpha: 1))
-            ctx.fillEllipse(in: CGRect(x: 5, y: 1, width: 6, height: 10))
+        cached("moon@\(scale)") {
+            PetSprites.render(size: moonSize, scale: scale) { ctx in
+                ctx.setShouldAntialias(true)
+                ctx.setFillColor(Palette.cream.copy(alpha: 0.14) ?? Palette.cream)
+                ctx.fillEllipse(in: CGRect(x: 0, y: 0, width: 16, height: 16))
+                ctx.setFillColor(CGColor(red: 0.96, green: 0.94, blue: 0.82, alpha: 1))
+                ctx.fillEllipse(in: CGRect(x: 3, y: 3, width: 10, height: 10))
+                // Crescent shadow and two craters.
+                ctx.setFillColor(CGColor(red: 0.10, green: 0.13, blue: 0.28, alpha: 0.9))
+                ctx.fillEllipse(in: CGRect(x: 6.5, y: 1.5, width: 10, height: 10))
+                ctx.setFillColor(CGColor(red: 0.80, green: 0.78, blue: 0.66, alpha: 1))
+                ctx.fillEllipse(in: CGRect(x: 5, y: 6, width: 2, height: 2))
+                ctx.fillEllipse(in: CGRect(x: 7, y: 9.5, width: 1.5, height: 1.5))
+            }
         }
     }
 
     public static func propImage(prop: String, scale: CGFloat) -> CGImage {
-        return image(size: CGSize(width: 10, height: 10), scale: scale) { ctx in
-            drawProp(ctx: ctx, prop: prop, size: CGSize(width: 10, height: 10))
+        cached("prop:\(prop)@\(scale)") {
+            PetSprites.render(size: propSize, scale: scale) { ctx in
+                drawProp(ctx: ctx, prop: prop)
+            }
         }
     }
 
-    // MARK: - Drawing primitives
+    // MARK: - Props (14×14, y-down, ground at y = 14)
 
-    private static func drawPet(ctx: CGContext, action: String, frame: Int, facing: String, size: CGSize) {
-        // Blob body
-        let bodyRect = CGRect(x: 6, y: 10, width: 20, height: 16)
-        ctx.setFillColor(Palette.brown)
-        ctx.fill(bodyRect.insetBy(dx: -1, dy: -1))
-        ctx.setFillColor(Palette.tangerine)
-        ctx.fill(bodyRect)
-
-        // Face patch
-        let faceX: CGFloat = facing == "right" ? 14 : 8
-        ctx.setFillColor(Palette.cream)
-        ctx.fill(CGRect(x: faceX, y: 12, width: 10, height: 8))
-
-        // Eye
-        let eyeX: CGFloat = facing == "right" ? 20 : 10
-        let eyeY: CGFloat = (action == "blink" && frame % 4 == 1) ? 15 : 14
-        let eyeH: CGFloat = (action == "blink" && frame % 4 == 1) ? 1 : 3
-        ctx.setFillColor(Palette.brown)
-        ctx.fill(CGRect(x: eyeX, y: eyeY, width: 2, height: eyeH))
-
-        // Ear tufts
-        ctx.setFillColor(Palette.tangerine)
-        ctx.fill(CGRect(x: 8, y: 6, width: 4, height: 5))
-        ctx.fill(CGRect(x: 20, y: 8, width: 3, height: 4))
-
-        // Cyan accent
-        ctx.setFillColor(Palette.cyan)
-        ctx.fill(CGRect(x: 15, y: 22, width: 2, height: 2))
-
-        // Frame-anim: bob for walk/dash/celebrate
-        // (Applied by the renderer via layer position, not here.)
-        _ = frame
-    }
-
-    private static func drawProp(ctx: CGContext, prop: String, size: CGSize) {
+    private static func drawProp(ctx: CGContext, prop: String) {
+        let outline = Palette.brown
         switch prop {
         case "crystal":
-            ctx.setFillColor(Palette.cyan)
-            ctx.beginPath()
-            ctx.move(to: CGPoint(x: 5, y: 0))
-            ctx.addLine(to: CGPoint(x: 9, y: 5))
-            ctx.addLine(to: CGPoint(x: 5, y: 10))
-            ctx.addLine(to: CGPoint(x: 1, y: 5))
-            ctx.closePath()
-            ctx.fillPath()
+            diamond(ctx, cx: 7, top: 2, bottom: 14, halfW: 4, color: outline)
+            diamond(ctx, cx: 7, top: 3, bottom: 13, halfW: 3, color: Palette.cyan)
+            ctx.setFillColor(CGColor(gray: 1, alpha: 0.7))
+            ctx.fill(CGRect(x: 5, y: 5, width: 1, height: 4))
         case "sprout":
-            ctx.setFillColor(Palette.brown)
-            ctx.fill(CGRect(x: 4, y: 6, width: 2, height: 4))
-            ctx.setFillColor(CGColor(red: 0.35, green: 0.65, blue: 0.35, alpha: 1))
-            ctx.fillEllipse(in: CGRect(x: 2, y: 2, width: 6, height: 4))
+            ctx.setFillColor(outline)
+            ctx.fill(CGRect(x: 6, y: 7, width: 2, height: 7))
+            let leaf = CGColor(red: 0.42, green: 0.75, blue: 0.38, alpha: 1)
+            ctx.setFillColor(outline)
+            ctx.fillEllipse(in: CGRect(x: 1, y: 4, width: 7, height: 5))
+            ctx.fillEllipse(in: CGRect(x: 6, y: 2, width: 7, height: 5))
+            ctx.setFillColor(leaf)
+            ctx.fillEllipse(in: CGRect(x: 2, y: 5, width: 5, height: 3))
+            ctx.fillEllipse(in: CGRect(x: 7, y: 3, width: 5, height: 3))
         case "cloud":
-            ctx.setFillColor(CGColor(gray: 0.85, alpha: 0.85))
-            ctx.fillEllipse(in: CGRect(x: 0, y: 3, width: 6, height: 4))
-            ctx.fillEllipse(in: CGRect(x: 3, y: 2, width: 5, height: 4))
-            ctx.fillEllipse(in: CGRect(x: 5, y: 4, width: 5, height: 4))
+            ctx.setFillColor(CGColor(gray: 0.78, alpha: 0.9))
+            ctx.fillEllipse(in: CGRect(x: 0, y: 6, width: 7, height: 6))
+            ctx.fillEllipse(in: CGRect(x: 4, y: 3, width: 7, height: 8))
+            ctx.fillEllipse(in: CGRect(x: 8, y: 6, width: 6, height: 6))
+            ctx.setFillColor(CGColor(gray: 0.96, alpha: 0.95))
+            ctx.fillEllipse(in: CGRect(x: 1, y: 5, width: 6, height: 5))
+            ctx.fillEllipse(in: CGRect(x: 4, y: 2, width: 7, height: 7))
+            ctx.fillEllipse(in: CGRect(x: 8, y: 5, width: 5, height: 5))
         case "puddle":
-            ctx.setFillColor(Palette.cyan.copy(alpha: 0.7) ?? Palette.cyan)
-            ctx.fillEllipse(in: CGRect(x: 0, y: 6, width: 10, height: 3))
+            ctx.setFillColor(CGColor(red: 0.20, green: 0.45, blue: 0.55, alpha: 0.9))
+            ctx.fillEllipse(in: CGRect(x: 0, y: 9, width: 14, height: 5))
+            ctx.setFillColor(Palette.cyan.copy(alpha: 0.85) ?? Palette.cyan)
+            ctx.fillEllipse(in: CGRect(x: 1, y: 10, width: 12, height: 3))
+            ctx.setFillColor(CGColor(gray: 1, alpha: 0.6))
+            ctx.fill(CGRect(x: 3, y: 10.5, width: 4, height: 1))
         case "lantern":
-            ctx.setFillColor(Palette.brown)
-            ctx.fill(CGRect(x: 4, y: 8, width: 2, height: 2))
+            ctx.setFillColor(Palette.golden.copy(alpha: 0.18) ?? Palette.golden)
+            ctx.fillEllipse(in: CGRect(x: 0, y: 0, width: 14, height: 14))
+            ctx.setFillColor(outline)
+            ctx.fill(CGRect(x: 6, y: 7, width: 2, height: 7))
+            ctx.fill(CGRect(x: 4, y: 13, width: 6, height: 1))
+            ctx.fill(CGRect(x: 4, y: 1, width: 6, height: 7))
             ctx.setFillColor(Palette.golden)
-            ctx.fillEllipse(in: CGRect(x: 2, y: 2, width: 6, height: 6))
+            ctx.fill(CGRect(x: 5, y: 2, width: 4, height: 5))
+            ctx.setFillColor(CGColor(red: 1, green: 0.95, blue: 0.75, alpha: 1))
+            ctx.fill(CGRect(x: 6, y: 3, width: 2, height: 3))
         case "stargazingSpot":
-            ctx.setFillColor(Palette.brown)
-            ctx.fill(CGRect(x: 1, y: 7, width: 8, height: 3))
-            ctx.setFillColor(Palette.cream)
-            ctx.fill(CGRect(x: 4, y: 2, width: 1, height: 1))
-            ctx.fill(CGRect(x: 7, y: 4, width: 1, height: 1))
-            ctx.fill(CGRect(x: 1, y: 3, width: 1, height: 1))
+            // A small log to sit on with a tuft of grass.
+            ctx.setFillColor(outline)
+            ctx.fill(CGRect(x: 0, y: 8, width: 14, height: 6))
+            ctx.setFillColor(CGColor(red: 0.55, green: 0.36, blue: 0.20, alpha: 1))
+            ctx.fill(CGRect(x: 1, y: 9, width: 12, height: 4))
+            ctx.setFillColor(CGColor(red: 0.80, green: 0.62, blue: 0.40, alpha: 1))
+            ctx.fillEllipse(in: CGRect(x: 10, y: 9, width: 3, height: 4))
+            ctx.setFillColor(CGColor(red: 0.42, green: 0.75, blue: 0.38, alpha: 1))
+            ctx.fill(CGRect(x: 2, y: 6, width: 1, height: 2))
+            ctx.fill(CGRect(x: 4, y: 5, width: 1, height: 3))
         default:
-            ctx.setFillColor(Palette.brown)
-            ctx.fill(CGRect(x: 2, y: 2, width: 6, height: 6))
+            ctx.setFillColor(outline)
+            ctx.fill(CGRect(x: 3, y: 6, width: 8, height: 8))
         }
     }
 
-    private static func image(size: CGSize, scale: CGFloat, drawing: (CGContext) -> Void) -> CGImage {
-        let w = Int(size.width  * scale)
-        let h = Int(size.height * scale)
-        let space = CGColorSpaceCreateDeviceRGB()
-        let bytesPerRow = 4 * w
-        let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8,
-                            bytesPerRow: bytesPerRow, space: space,
-                            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
-        ctx.interpolationQuality = .none
-        ctx.scaleBy(x: scale, y: scale)
-        drawing(ctx)
-        return ctx.makeImage()!
+    private static func diamond(_ ctx: CGContext, cx: CGFloat, top: CGFloat, bottom: CGFloat, halfW: CGFloat, color: CGColor) {
+        let midY = (top + bottom) / 2
+        ctx.setFillColor(color)
+        ctx.beginPath()
+        ctx.move(to: CGPoint(x: cx, y: top))
+        ctx.addLine(to: CGPoint(x: cx + halfW, y: midY))
+        ctx.addLine(to: CGPoint(x: cx, y: bottom))
+        ctx.addLine(to: CGPoint(x: cx - halfW, y: midY))
+        ctx.closePath()
+        ctx.fillPath()
+    }
+
+    private static func cached(_ key: String, _ make: () -> CGImage) -> CGImage {
+        if let hit = cache[key] { return hit }
+        let img = make()
+        cache[key] = img
+        return img
     }
 }

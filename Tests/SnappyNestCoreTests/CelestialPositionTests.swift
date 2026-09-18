@@ -5,48 +5,47 @@ import XCTest
 final class CelestialPositionTests: XCTestCase {
     private let size = CGSize(width: 685, height: 30)
 
-    func testSunIsAtLeftAtMidnightNo() {
-        // midnight is a moon, not a sun
-        let p = CelestialSolver.position(for: WorldTime(hour: 0, minute: 0, second: 0), sceneSize: size)
-        XCTAssertEqual(p.body, .moon)
+    private func at(_ h: Int, _ m: Int = 0) -> CelestialPosition {
+        CelestialSolver.position(for: WorldTime(hour: h, minute: m, second: 0), sceneSize: size)
     }
 
-    func testSunAtNoonIsCentered() {
-        let p = CelestialSolver.position(for: WorldTime(hour: 12, minute: 0, second: 0), sceneSize: size)
+    func testMidnightIsMoonAtCenter() {
+        let p = at(0)
+        XCTAssertEqual(p.body, .moon)
+        XCTAssertEqual(p.point.x, size.width / 2, accuracy: 1e-6)
+    }
+
+    func testNoonIsSunAtCenter() {
+        let p = at(12)
         XCTAssertEqual(p.body, .sun)
         XCTAssertEqual(p.point.x, size.width / 2, accuracy: 1e-6)
     }
 
-    func testMoonAtMidnightIsCentered() {
-        let p = CelestialSolver.position(for: WorldTime(hour: 0, minute: 0, second: 0), sceneSize: size)
+    func testSunRisesAtLeftEdgeAndSetsAtRightEdge() {
+        XCTAssertEqual(at(6).point.x, 0, accuracy: 1e-6)
+        XCTAssertEqual(at(17, 59).point.x, size.width, accuracy: size.width / (12 * 60) + 1e-6)
+        XCTAssertEqual(at(6).point.y, CelestialSolver.topInset + CelestialSolver.arcAmplitude, accuracy: 1e-6)
+    }
+
+    func testMoonRisesAtLeftEdgeAtSunset() {
+        let p = at(18)
         XCTAssertEqual(p.body, .moon)
         XCTAssertEqual(p.point.x, 0, accuracy: 1e-6)
-        // Midnight is the left edge in the panorama; a mirrored copy should
-        // render at x = width to keep the moon visible at the seam.
-        XCTAssertNotNil(p.seamMirror)
-        XCTAssertEqual(p.seamMirror?.x ?? -1, size.width, accuracy: 1e-6)
+        XCTAssertEqual(at(5, 59).body, .moon)
+        XCTAssertEqual(at(5, 59).point.x, size.width, accuracy: size.width / (12 * 60) + 1e-6)
     }
 
-    func testSunArcPeaksAtNoon() {
-        let noon = CelestialSolver.position(for: WorldTime(hour: 12, minute: 0, second: 0), sceneSize: size)
-        let ten = CelestialSolver.position(for: WorldTime(hour: 10, minute: 0, second: 0), sceneSize: size)
-        // Peak = smallest y in flipped coords.
-        XCTAssertLessThan(noon.point.y, ten.point.y)
+    func testArcPeaksAtNoonAndMidnight() {
+        XCTAssertLessThan(at(12).point.y, at(10).point.y)
+        XCTAssertLessThan(at(0).point.y, at(22).point.y)
+        XCTAssertEqual(at(12).point.y, CelestialSolver.topInset, accuracy: 1e-6)
     }
 
-    func testHorizontalLinearMapping() {
-        let a = CelestialSolver.position(for: WorldTime(hour: 6, minute: 0, second: 0), sceneSize: size).point.x
-        let b = CelestialSolver.position(for: WorldTime(hour: 18, minute: 0, second: 0), sceneSize: size).point.x
-        XCTAssertEqual(a, size.width * 0.25, accuracy: 1e-6)
-        XCTAssertEqual(b, size.width * 0.75, accuracy: 1e-6)
-    }
-
-    func testMoonSeamMirrorNearEnd() {
-        // Just before midnight: moon at x close to width. Mirror should be near 0.
-        let t = WorldTime(hour: 23, minute: 59, second: 59)
-        let p = CelestialSolver.position(for: t, sceneSize: size)
-        if p.point.x > size.width - CelestialSolver.bodyHalfWidth {
-            XCTAssertNotNil(p.seamMirror)
-        }
+    func testHorizontalRangeIsRespected() {
+        let range: ClosedRange<CGFloat> = 100...500
+        let rise = CelestialSolver.position(for: WorldTime(hour: 6, minute: 0, second: 0), sceneSize: size, horizontalRange: range)
+        let noon = CelestialSolver.position(for: WorldTime(hour: 12, minute: 0, second: 0), sceneSize: size, horizontalRange: range)
+        XCTAssertEqual(rise.point.x, 100, accuracy: 1e-6)
+        XCTAssertEqual(noon.point.x, 300, accuracy: 1e-6)
     }
 }

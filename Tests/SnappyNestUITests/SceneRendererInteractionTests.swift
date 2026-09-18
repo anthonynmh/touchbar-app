@@ -58,12 +58,89 @@ final class SceneRendererInteractionTests: XCTestCase {
         XCTAssertEqual(volume ?? -1, 1, accuracy: 1e-6)
     }
 
+    func testTapOnPetCallsPetTapNotGround() {
+        let renderer = makeRenderer()
+        let model = makeModel()
+        renderer.update(model: model)
+        var petTaps = 0
+        var groundX: CGFloat?
+        renderer.onPetTap = { petTaps += 1 }
+        renderer.onGroundTap = { groundX = $0 }
+
+        let pet = model.pet.hitRect(spriteSize: PetSprites.cellSize)
+        renderer.handleTap(at: CGPoint(x: pet.midX, y: pet.midY))
+        // Just outside the sprite but inside the slop still counts.
+        renderer.handleTap(at: CGPoint(x: pet.maxX + SceneRenderer.tapSlop - 1, y: pet.midY))
+
+        XCTAssertEqual(petTaps, 2)
+        XCTAssertNil(groundX)
+    }
+
+    func testTapOnEmptyGroundCallsGroundTapWithX() {
+        let renderer = makeRenderer()
+        let model = makeModel()
+        renderer.update(model: model)
+        var petTaps = 0
+        var groundX: CGFloat?
+        renderer.onPetTap = { petTaps += 1 }
+        renderer.onGroundTap = { groundX = $0 }
+
+        let x = model.layout.middle.maxX - 40
+        renderer.handleTap(at: CGPoint(x: x, y: 24))
+
+        XCTAssertEqual(petTaps, 0)
+        XCTAssertEqual(groundX ?? -1, x, accuracy: 1e-6)
+    }
+
+    func testTapOutsideMiddleDoesNotCallGroundTap() {
+        let renderer = makeRenderer()
+        var model = makeModel()
+        model = makeModel(brightnessAvailable: false)
+        renderer.update(model: model)
+        var groundX: CGFloat?
+        renderer.onGroundTap = { groundX = $0 }
+        renderer.handleTap(at: CGPoint(x: model.layout.brightness.midX, y: 15))
+        renderer.handleTap(at: CGPoint(x: model.layout.battery.midX, y: 15))
+        XCTAssertNil(groundX)
+    }
+
+    func testTapOnSunRevealsClockThenHidesIt() {
+        let renderer = makeRenderer()
+        let model = makeModel()
+        var clock = Date(timeIntervalSince1970: 1_700_000_000)
+        renderer.now = { clock }
+        renderer.update(model: model)
+        var petTaps = 0
+        var groundX: CGFloat?
+        renderer.onPetTap = { petTaps += 1 }
+        renderer.onGroundTap = { groundX = $0 }
+        XCTAssertFalse(renderer.isClockRevealed)
+
+        renderer.handleTap(at: model.celestial.point)
+        XCTAssertTrue(renderer.isClockRevealed)
+        XCTAssertEqual(petTaps, 0)
+        XCTAssertNil(groundX)
+
+        clock = clock.addingTimeInterval(SceneRenderer.clockRevealDuration - 0.5)
+        renderer.update(model: model)
+        XCTAssertTrue(renderer.isClockRevealed)
+
+        clock = clock.addingTimeInterval(1)
+        renderer.update(model: model)
+        XCTAssertFalse(renderer.isClockRevealed)
+    }
+
     private func makeRenderer() -> SceneRenderer {
         SceneRenderer(frame: bounds)
     }
 
-    private func makeModel() -> SceneModel {
-        let layout = LayoutEngine(bounds: bounds, backingScale: 2).regions
+    private func makeModel(brightnessAvailable: Bool = true) -> SceneModel {
+        let engine = LayoutEngine(bounds: bounds, backingScale: 2)
+        let layout = engine.regions
+        let time = WorldTime(hour: 12, minute: 0, second: 0)
+        let pet = PetState(action: .idle, facing: .right,
+                           position: CGPoint(x: layout.middle.minX + 80, y: layout.middle.maxY - 4),
+                           frameIndex: 0)
         let media = MediaSnapshot(
             identity: "test",
             state: .paused,
@@ -76,17 +153,18 @@ final class SceneRendererInteractionTests: XCTestCase {
             canReadDuration: true
         )
         return SceneModel(
-            time: WorldTime(hour: 12, minute: 0, second: 0),
+            time: time,
             celestial: CelestialSolver.position(
-                for: WorldTime(hour: 12, minute: 0, second: 0),
-                sceneSize: bounds.size
+                for: time,
+                sceneSize: bounds.size,
+                horizontalRange: (layout.middle.minX + 8)...(layout.middle.maxX - 8)
             ),
             layout: layout,
             props: [],
-            pet: .placeholder,
+            pet: pet,
             battery: BatterySnapshot(isPresent: true, percentage: 0.8, isCharging: false),
             brightness: 0.5,
-            brightnessAvailable: true,
+            brightnessAvailable: brightnessAvailable,
             volume: 0.5,
             volumeMuted: false,
             volumeAvailable: true,
