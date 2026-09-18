@@ -1,32 +1,39 @@
 import AppKit
 import Foundation
 
-/// AppleScript-driven adapter for the Spotify.app player. Requires Automation
-/// permission (macOS asks the user on first execute; deny → the adapter
-/// stays in `.unknown` forever).
-public final class SpotifyMediaSource: MediaSource {
-    public let identity = "spotify"
-    public private(set) var snapshot: MediaSnapshot = .unknown
+/// The OS surface `SpotifyMediaSource` touches. Kept behind a bridge so the
+/// launch-avoidance policy can be tested without Spotify installed.
+internal protocol SpotifyScriptingBridge: AnyObject {
+    func isInstalled() -> Bool
+    /// `isRunning` is true when a Spotify process exists; `isTerminated` is
+    /// true once that process has exited but is still tracked.
+    func runningApplication() -> (isRunning: Bool, isTerminated: Bool)
+    /// Executes the player-state script. Returns the raw `"state|pos|dur|name"`
+    /// string, `"not_running"`, or nil on any AppleScript error.
+    func readPlayerState() -> String?
+    func sendPlayPause()
+    func observeWorkspace(launch: @escaping () -> Void, terminate: @escaping () -> Void)
+    func observePlaybackStateChanged(_ handler: @escaping ([AnyHashable: Any]?) -> Void)
+}
 
-    private var pollTimer: Timer?
-    private var handlers: [(MediaSnapshot) -> Void] = []
+/// How the source hops between the script thread and the main thread. Tests
+/// substitute synchronous closures.
+internal struct SpotifyDispatch {
+    var background: (@escaping () -> Void) -> Void
+    var main: (@escaping () -> Void) -> Void
 
-    public init() {
-        pollTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            self?.refresh()
-        }
-        DistributedNotificationCenter.default().addObserver(
-            forName: NSNotification.Name("com.spotify.client.PlaybackStateChanged"),
-            object: nil, queue: .main
-        ) { [weak self] _ in self?.refresh() }
-        refresh()
-    }
+    static let immediate = SpotifyDispatch(background: { $0() }, main: { $0() })
+}
+
+/// Real bridge. `tell application "Spotify"` launches the app whenever an
+/// Apple event is delivered to a process that is absent or tearing down, so
+/// nothing here sends an event unless the source's policy says Spotify is
+/// alive. The script's own `is running` guard is only a second line of defence.
+private final class SystemSpotifyScriptingBridge: SpotifyScriptingBridge {
+    static let bundleID = "com.spotify.client"
 
     private static let scriptSource = """
-    tell application "System Events"
-        set isRunning to (name of processes) contains "Spotify"
-    end tell
-    if isRunning is false then
+    if application "Spotify" is not running then
         return "not_running"
     end if
     tell application "Spotify"
@@ -57,43 +64,234 @@ public final class SpotifyMediaSource: MediaSource {
     end tell
     """
 
-    private func refresh() {
-        DispatchQueue.global(qos: .utility).async { [weak self] in
-            guard let self = self else { return }
-            let snapshot = self.runScript()
-            DispatchQueue.main.async {
-                self.publish(snapshot)
+    private static let playPauseSource = """
+    if application "Spotify" is running then
+        tell application "Spotify" to playpause
+    end if
+    """
+
+    // Compiled once; NSAppleScript is only ever used from the source's serial queue.
+    private lazy var stateScript = NSAppleScript(source: Self.scriptSource)
+    private lazy var playPauseScript = NSAppleScript(source: Self.playPauseSource)
+    private var observers: [NSObjectProtocol] = []
+
+    func isInstalled() -> Bool {
+        NSWorkspace.shared.urlForApplication(withBundleIdentifier: Self.bundleID) != nil
+    }
+
+    func runningApplication() -> (isRunning: Bool, isTerminated: Bool) {
+        let apps = NSRunningApplication.runningApplications(withBundleIdentifier: Self.bundleID)
+        guard !apps.isEmpty else { return (false, false) }
+        return (true, apps.allSatisfy { $0.isTerminated })
+    }
+
+    func readPlayerState() -> String? {
+        guard let script = stateScript else { return nil }
+        var err: NSDictionary?
+        let result = script.executeAndReturnError(&err)
+        if err != nil { return nil }
+        return result.stringValue
+    }
+
+    func sendPlayPause() {
+        var err: NSDictionary?
+        _ = playPauseScript?.executeAndReturnError(&err)
+    }
+
+    func observeWorkspace(launch: @escaping () -> Void, terminate: @escaping () -> Void) {
+        let center = NSWorkspace.shared.notificationCenter
+        func isSpotify(_ note: Notification) -> Bool {
+            let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+            return app?.bundleIdentifier == Self.bundleID
+        }
+        observers.append(center.addObserver(
+            forName: NSWorkspace.didLaunchApplicationNotification, object: nil, queue: .main
+        ) { note in if isSpotify(note) { launch() } })
+        observers.append(center.addObserver(
+            forName: NSWorkspace.didTerminateApplicationNotification, object: nil, queue: .main
+        ) { note in if isSpotify(note) { terminate() } })
+    }
+
+    func observePlaybackStateChanged(_ handler: @escaping ([AnyHashable: Any]?) -> Void) {
+        observers.append(DistributedNotificationCenter.default().addObserver(
+            forName: NSNotification.Name("com.spotify.client.PlaybackStateChanged"),
+            object: nil, queue: .main
+        ) { note in handler(note.userInfo) })
+    }
+}
+
+/// AppleScript-driven adapter for the Spotify.app player. Requires Automation
+/// permission (macOS asks the user on first execute; deny → the adapter
+/// stays in `.unknown` forever).
+///
+/// Policy: an Apple event is only sent when Spotify is installed, has a live
+/// non-terminated process, and no quit is suspected. Spotify posts a
+/// `PlaybackStateChanged` with `Player State = Stopped` while quitting;
+/// scripting during that window relaunches it, so the source goes quiet for
+/// `quiesceInterval` instead. Polling only runs while Spotify is running.
+public final class SpotifyMediaSource: MediaSource {
+    public let identity = "spotify"
+    public private(set) var snapshot: MediaSnapshot = .unknown
+
+    internal static let quiesceInterval: TimeInterval = 3.0
+
+    private let bridge: SpotifyScriptingBridge
+    private let now: () -> Date
+    private let dispatch: SpotifyDispatch
+    private var pollTimer: Timer?
+    private var handlers: [(MediaSnapshot) -> Void] = []
+    private var scriptingSuppressedUntil: Date = .distantPast
+    private var inFlight = false
+
+    public convenience init() {
+        let queue = DispatchQueue(label: "snappy-nest.spotify-script", qos: .utility)
+        self.init(
+            bridge: SystemSpotifyScriptingBridge(),
+            now: Date.init,
+            dispatch: SpotifyDispatch(
+                background: { queue.async(execute: $0) },
+                main: { DispatchQueue.main.async(execute: $0) }
+            ),
+            usesTimer: true
+        )
+    }
+
+    internal init(bridge: SpotifyScriptingBridge,
+                  now: @escaping () -> Date = Date.init,
+                  dispatch: SpotifyDispatch = .immediate,
+                  usesTimer: Bool = false) {
+        self.bridge = bridge
+        self.now = now
+        self.dispatch = dispatch
+        self.usesTimer = usesTimer
+
+        bridge.observeWorkspace(
+            launch: { [weak self] in self?.spotifyDidLaunch() },
+            terminate: { [weak self] in self?.spotifyDidTerminate() }
+        )
+        bridge.observePlaybackStateChanged { [weak self] info in
+            self?.playbackStateDidChange(info)
+        }
+
+        if bridge.runningApplication().isRunning {
+            startPolling()
+            refresh()
+        } else {
+            publish(Self.notRunningSnapshot(identity: identity))
+        }
+    }
+
+    deinit { pollTimer?.invalidate() }
+
+    // MARK: Polling lifecycle
+
+    private let usesTimer: Bool
+    /// True while the 1 Hz poll is active (only when Spotify is running).
+    internal private(set) var isPolling = false
+
+    private func startPolling() {
+        guard !isPolling else { return }
+        isPolling = true
+        if usesTimer {
+            pollTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+                self?.pollTick()
             }
         }
     }
 
-    private func runScript() -> MediaSnapshot {
-        guard NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.spotify.client") != nil else {
-            return MediaSnapshot(identity: identity, state: .unknown)
+    private func stopPolling() {
+        isPolling = false
+        pollTimer?.invalidate()
+        pollTimer = nil
+    }
+
+    /// One poll-timer firing. Exposed so tests can drive it without a run loop.
+    internal func pollTick() {
+        guard isPolling else { return }
+        refresh()
+    }
+
+    private func spotifyDidLaunch() {
+        scriptingSuppressedUntil = .distantPast
+        startPolling()
+        refresh()
+    }
+
+    private func spotifyDidTerminate() {
+        stopPolling()
+        scriptingSuppressedUntil = .distantPast
+        publish(Self.notRunningSnapshot(identity: identity))
+    }
+
+    private func playbackStateDidChange(_ info: [AnyHashable: Any]?) {
+        let playerState = info?["Player State"] as? String
+        if playerState == "Stopped" {
+            // Spotify posts this while quitting. Any Apple event now relaunches it.
+            suppressScripting()
+            publish(MediaSnapshot(identity: identity, state: .stopped, canPlayPause: true))
+            return
         }
-        var err: NSDictionary?
-        guard let script = NSAppleScript(source: Self.scriptSource) else {
-            return MediaSnapshot(identity: identity, state: .unknown)
+        refresh()
+    }
+
+    private func suppressScripting() {
+        scriptingSuppressedUntil = now().addingTimeInterval(Self.quiesceInterval)
+    }
+
+    /// The single gate in front of every Apple event.
+    private func shouldScript() -> Bool {
+        guard bridge.isInstalled() else { return false }
+        let app = bridge.runningApplication()
+        guard app.isRunning, !app.isTerminated else { return false }
+        return now() >= scriptingSuppressedUntil
+    }
+
+    // MARK: Reading state
+
+    private func refresh() {
+        guard shouldScript(), !inFlight else { return }
+        inFlight = true
+        dispatch.background { [weak self] in
+            guard let self = self else { return }
+            let raw = self.bridge.readPlayerState()
+            self.dispatch.main {
+                self.inFlight = false
+                self.handleScriptResult(raw)
+            }
         }
-        let result = script.executeAndReturnError(&err)
-        if err != nil {
-            return MediaSnapshot(identity: identity, state: .unknown)
+    }
+
+    private func handleScriptResult(_ raw: String?) {
+        guard let raw = raw else {
+            // An AppleScript error mid-poll usually means the process is going
+            // away; back off rather than retry into a launch.
+            suppressScripting()
+            publish(MediaSnapshot(identity: identity, state: .unknown))
+            return
         }
-        guard let out = result.stringValue else {
-            return MediaSnapshot(identity: identity, state: .unknown)
+        if raw == "not_running" {
+            publish(Self.notRunningSnapshot(identity: identity))
+            return
         }
-        if out == "not_running" {
-            return MediaSnapshot(identity: identity, state: .stopped, canPlayPause: true, canReadPosition: false, canReadDuration: false)
-        }
-        let parts = out.components(separatedBy: "|")
-        guard parts.count >= 4 else { return .unknown }
-        let stateText = parts[0]
+        publish(Self.parse(raw, identity: identity) ?? .unknown)
+    }
+
+    internal static func notRunningSnapshot(identity: String) -> MediaSnapshot {
+        MediaSnapshot(identity: identity, state: .stopped, canPlayPause: true,
+                      canReadPosition: false, canReadDuration: false)
+    }
+
+    /// Parses `"state|pos|dur|name"` as returned by the player-state script.
+    internal static func parse(_ raw: String, identity: String, at date: Date = Date()) -> MediaSnapshot? {
+        let parts = raw.components(separatedBy: "|")
+        guard parts.count >= 4 else { return nil }
         let pos = Double(parts[1]) ?? -1
         let dur = Double(parts[2]) ?? -1
-        let name = parts[3]
+        // Track names may themselves contain "|".
+        let name = parts[3...].joined(separator: "|")
 
         let state: MediaSnapshot.State
-        switch stateText {
+        switch parts[0] {
         case "playing": state = .playing
         case "paused":  state = .paused
         default:        state = .stopped
@@ -102,7 +300,7 @@ public final class SpotifyMediaSource: MediaSource {
             identity: identity, state: state,
             elapsed: pos >= 0 ? pos : nil,
             duration: dur > 0 ? dur : nil,
-            elapsedAt: Date(),
+            elapsedAt: date,
             rate: 1,
             title: name.isEmpty ? nil : name,
             canPlayPause: true,
@@ -117,19 +315,17 @@ public final class SpotifyMediaSource: MediaSource {
         handlers.forEach { $0(new) }
     }
 
+    // MARK: MediaSource
+
+    /// No-op unless Spotify is running: the pet must never launch Spotify.
     public func togglePlayPause() {
-        let source = """
-        tell application "Spotify" to playpause
-        """
-        DispatchQueue.global(qos: .utility).async {
-            if let s = NSAppleScript(source: source) {
-                var err: NSDictionary?
-                _ = s.executeAndReturnError(&err)
+        guard shouldScript() else { return }
+        dispatch.background { [weak self] in
+            self?.bridge.sendPlayPause()
+            self?.dispatch.main { [weak self] in
+                // Refresh sooner than the next poll.
+                self?.refresh()
             }
-        }
-        // Refresh sooner than the next poll.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
-            self?.refresh()
         }
     }
 

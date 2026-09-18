@@ -92,6 +92,10 @@ public final class MediaRemoteSource: MediaSource {
     }
 
     public func togglePlayPause() {
+        // With no now-playing client, mediaremoted routes the command to the
+        // default/last media app and launches it (like the F8 key opening
+        // Music). Only send when something is actually registered.
+        guard snapshot.state == .playing || snapshot.state == .paused else { return }
         // MRCommand 2 = togglePlayPause on most macOS versions.
         _ = sendFn?(2, nil)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
