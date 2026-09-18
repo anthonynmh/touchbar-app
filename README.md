@@ -5,7 +5,8 @@ A single-screen pixel-art world that lives on the Touch Bar: a fixed 24-hour pan
 orange fantasy pet roaming the middle third, a segmented battery meter on the left,
 and directly-draggable brightness + volume + contextual play/pause on the right.
 
-Local-only. No cloud, no telemetry, no microphone, no network. Works fully offline.
+Local-only. No cloud, no telemetry, no microphone, and no network code. Works
+fully offline. The current local build is not App-Sandboxed.
 
 The pet doubles as a playback progress indicator for Spotify and, when the browser
 publishes Now Playing info, for YouTube in Firefox.
@@ -46,7 +47,8 @@ Populated from the initial target-machine validation on 2026-09-17.
 ## Probe results
 
 Measured on this Mac on 2026-09-18 (macOS 26.6.2, `MacBookPro17,1`, `TouchBarServer` pid varies).
-Re-run any probe with `./Install/run-probe.sh 0N` after building.
+Re-run any probe with `./Install/run-probe.sh 0N` after building. Probes 03 and
+04 are read-only unless `--write` is passed explicitly.
 
 - **01 · Touch Bar render (bounds + backing scale):** ✅ ok · Touch Bar window
   app-control region is **685.0 × 30.0 pt @ 2.00× backing** (= 1370 × 60
@@ -118,10 +120,11 @@ Current build (`v0.1.0-dev`), verified on this Mac on 2026-09-18:
   attachment timeout automatically selects the app-frontmost fallback.
 - ✅ Public fallback activates the accessory app and uses a key-capable hidden
   window to establish the responder chain.
-- ✅ Menu bar 🐾, escape hatch (`Opt+Cmd+\` or menu), enlarged 6× preview.
-- ✅ 63 XCTest cases: 55 core tests plus 8 UI/presenter tests, including 13
-  isolated Core Audio bridge tests for channel selection, mute handling,
-  rollback, device availability, rebinding, and listener cleanup.
+- ✅ Menu bar 🐾, escape hatch (menu command with an `Opt+Cmd+\` key
+  equivalent while the app receives menu events), enlarged 6× preview.
+- ✅ XCTest coverage for scene behavior, UI/presentation, and isolated
+  brightness/Core Audio bridges, including status checks, readback,
+  transactional rollback, device availability, rebinding, and cleanup.
 - ✅ `install.sh` / `uninstall.sh` / `Makefile` including `dmg` +
   `notarize` opt-in targets.
 
@@ -154,7 +157,7 @@ touchbar-pet/
     SnappyNestCoreTests/       # 55 model/provider XCTest cases
     SnappyNestUITests/         # 8 renderer/presenter XCTest cases
   Install/
-    install.sh   uninstall.sh   wrap-as-app.sh   run-probe.sh
+    install.sh   uninstall.sh   clean.sh   wrap-as-app.sh   run-probe.sh
   Makefile
   README.md   LICENSE
 ```
@@ -166,7 +169,8 @@ touchbar-pet/
   time we ask; deny it and the Spotify adapter reports `.unavailable`.
 - No microphone.
 - No accessibility.
-- No network. The app's sandbox has `com.apple.security.network.client = false`.
+- No network code. The current locally built app is not App-Sandboxed, so this
+  is an implementation property rather than an entitlement-enforced boundary.
 
 ## Build steps
 
@@ -189,9 +193,10 @@ Local, offline, unsigned build for your own machine:
 ```
 
 The script verifies macOS ≥ 26 + arm64, runs `swift build -c release`, wraps the
-executable in a minimal `.app`, and copies it to `/Applications/TouchbarPet.app`.
-It refuses to run as root, never touches `/System` or `/Library`, does not launch
-the app after copying, and does not enable launch-at-login.
+executable in a private staging directory beside the destination, and atomically
+installs it as `/Applications/TouchbarPet.app`. It refuses to run as root, never
+touches `/System` or `/Library`, does not launch the app after installation, and
+does not enable launch-at-login.
 
 To uninstall:
 
@@ -226,12 +231,12 @@ key when final art ships so the debug badge stops rendering.
 
 ## Escape hatch
 
-Three ways to reclaim the default macOS Touch Bar:
+Ways to reclaim the default macOS Touch Bar:
 
-1. **Global shortcut:** `⌥⌘\` (configurable in Preferences → General). Toggles the
-   overlay off and on without quitting.
-2. **Menu bar → Snappy Nest → Hide Touch Bar Overlay.** Same effect as the shortcut.
-3. **Menu bar → Snappy Nest → Quit.** Full teardown; the default Control Strip returns
+1. **Menu bar → Snappy Nest → Hide Touch Bar Overlay.** The menu item has an
+   `⌥⌘\` key equivalent, but the app does not register a global hotkey and the
+   key equivalent is not guaranteed while another application is active.
+2. **Menu bar → Snappy Nest → Quit.** Full teardown; the default Control Strip returns
    immediately.
 
 ## Private-API risk register
@@ -267,8 +272,10 @@ simulation panel for clock / battery / playback. All state will persist to
 
 - `swift test` runs 63 tests: 55 core/provider tests and 8 UI/presenter tests.
 - `./Install/run-probe.sh 0N` (N = 1…5) rebuilds and runs a specific probe.
-- Probe 04 briefly changes the active output volume, verifies volume and mute
-  readback, and restores every captured control before reporting success.
+- `./Install/run-probe.sh 03` and `04` perform read-only diagnostics by default.
+  Add `--write` for a small verified round trip with mute preserved. Probe 04
+  changes mute only with the additional explicit `--allow-unmute` flag. Every
+  write mode verifies restoration and exits nonzero if readback differs.
 - Battery-independence acceptance test in `PetControllerBatteryIndependenceTests`:
   600 ticks × 3 battery states (dying / full / charging) produce a
   byte-identical `PetAction` log for a fixed seed + clock + media.
@@ -294,7 +301,8 @@ simulation panel for clock / battery / playback. All state will persist to
   writable virtual-main, main, or complete stereo volume pair (common with
   HDMI/S-PDIF passthrough). Snappy Nest re-binds automatically when the default
   output changes. Run `./Install/run-probe.sh 04` to see the selected strategy,
-  channels, mute controls, write/readback statuses, and restoration result.
+  channels, mute controls, and current readback without changing them. Use
+  `./Install/run-probe.sh 04 --write` only when a verified round trip is wanted.
 - **Menu bar says “App-frontmost.”** The private persistent path was unavailable
   or failed to attach, so Snappy Nest activated its public fallback. That bar is
   expected only while Snappy Nest is frontmost.
@@ -305,7 +313,7 @@ simulation panel for clock / battery / playback. All state will persist to
 ## Non-goals
 
 - No microphone / audio recording.
-- No network of any kind.
+- No network code (the current app is not App-Sandboxed).
 - No sleep prevention, no SIP disabling, no privileged helpers, no input simulation.
 - No astronomical sunrise/sunset — sun/moon uses a fixed stylized 06:00 / 18:00.
 - No Music.app adapter in the first release. First-release media sources are Spotify

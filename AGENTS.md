@@ -85,3 +85,8 @@ new behavior that is not obvious from the source.
   Probe 04 passed on hardware using device 97 and `virtual-main`: it changed
   `0.0253` to `0.0753`, confirmed volume/mute, and restored the original state
   with all statuses equal to `noErr`.
+- 2026-09-18 — Hardened cleanup, private app/probe staging, and atomic install
+  replacement. Probes 03/04 are now read-only by default; hardware writes require
+  `--write`, and Probe 04 requires `--allow-unmute` before exercising mute.
+  Brightness and volume providers verify every write and rollback readback, and
+  become unavailable after an incomplete rollback rather than reporting success.
