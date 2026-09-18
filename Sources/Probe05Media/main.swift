@@ -4,7 +4,7 @@
 //      script fetching player state / position / duration / track name.
 //      Requests Automation permission the first time (System Settings prompt).
 //      Success:  SPOTIFY ok state=<...> position=<sec> duration=<sec> track=<...>
-//      Skipped:  SPOTIFY skip reason=not_installed
+//      Skipped:  SPOTIFY skip reason=not_installed|not_running|terminating
 //      Failure:  SPOTIFY fail reason=<...>
 //
 // 05b  MediaRemote adapter for browser (Firefox/YouTube). dlopens
@@ -28,11 +28,20 @@ func probeSpotify() {
         return
     }
 
+    // Never send an Apple event to a process that is absent or tearing down:
+    // that relaunches Spotify. Check from Swift first, then guard in-script.
+    let apps = NSRunningApplication.runningApplications(withBundleIdentifier: "com.spotify.client")
+    if apps.isEmpty {
+        print("SPOTIFY skip reason=not_running")
+        return
+    }
+    if apps.allSatisfy({ $0.isTerminated }) {
+        print("SPOTIFY skip reason=terminating")
+        return
+    }
+
     let source = """
-    tell application "System Events"
-        set isRunning to (name of processes) contains "Spotify"
-    end tell
-    if isRunning is false then
+    if application "Spotify" is not running then
         return "not_running"
     end if
     tell application "Spotify"
