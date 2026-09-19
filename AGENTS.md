@@ -243,4 +243,5 @@ same notes. Keep all content here; do not duplicate it in `CLAUDE.md`.
   `PetSprites` into a shared pose model plus per-species drawers with the
   cat extracted byte-identically, and added three species — Mecha, Cactus,
   Eldritch Eye — chosen from a 🐾 → Pet submenu and persisted with the
-  media source choice. 162 tests. Hardware verification pending.
+  media source choice. 157 tests (154 + 3 snapshot writers). Hardware
+  verification pending.
