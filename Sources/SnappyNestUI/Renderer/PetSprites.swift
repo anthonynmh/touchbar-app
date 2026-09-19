@@ -24,7 +24,7 @@ public enum PetSprites {
         switch species {
         case .cat:         return CatSprite.self
         case .mecha:       return MechaSprite.self
-        case .cactus:      return CatSprite.self
+        case .cactus:      return CactusSprite.self
         case .eldritchEye: return CatSprite.self
         }
     }
