@@ -22,6 +22,15 @@
 //      Success:  MEDIAREMOTE_HOST ok <json line>
 //      Empty:    MEDIAREMOTE_HOST none no_now_playing_info
 //      Failure:  MEDIAREMOTE_HOST fail reason=<...>
+//
+// 05d  (`--watch`) The same host, streamed for 30 seconds instead of once.
+//      Each line now carries `bundle`, the now-playing client's bundle id.
+//      Procedure: play YouTube in Firefox, start the watch, launch Spotify
+//      (leave it paused), and see whether `bundle` stays
+//      `org.mozilla.firefox` or flips to `com.spotify.client` while Firefox
+//      keeps playing. That decides whether `MediaArbiter` can keep the
+//      playback page on Firefox or mediaremoted has stopped reporting it.
+//      Lines:    MEDIAREMOTE_WATCH <elapsed-seconds> <json line>
 
 import AppKit
 import Darwin
@@ -199,6 +208,48 @@ func probeMediaRemoteHost() {
     }
 }
 
+// -----------------------------------------------------------------------------
+// 05d — MediaRemote host, streamed
+
+func watchMediaRemoteHost(seconds: TimeInterval) {
+    guard let dylib = ProcessInfo.processInfo.environment["SNAPPY_MEDIAREMOTE_HOST"], !dylib.isEmpty else {
+        print("MEDIAREMOTE_WATCH fail reason=SNAPPY_MEDIAREMOTE_HOST_unset")
+        return
+    }
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/perl")
+    process.arguments = ["-e", MediaRemoteHostLauncher.perlScript, dylib]
+    let out = Pipe()
+    let input = Pipe()
+    process.standardOutput = out
+    process.standardInput = input
+    do { try process.run() } catch {
+        print("MEDIAREMOTE_WATCH fail reason=spawn error=\(error)")
+        return
+    }
+    let started = Date()
+    print("MEDIAREMOTE_WATCH start seconds=\(Int(seconds)) — launch Spotify now and watch `bundle`")
+    var buffer = Data()
+    out.fileHandleForReading.readabilityHandler = { handle in
+        let data = handle.availableData
+        guard !data.isEmpty else { return }
+        buffer.append(data)
+        while let newline = buffer.firstIndex(of: UInt8(ascii: "\n")) {
+            let line = String(decoding: buffer[buffer.startIndex..<newline], as: UTF8.self)
+            buffer.removeSubrange(buffer.startIndex...newline)
+            let t = String(format: "%.1f", Date().timeIntervalSince(started))
+            print("MEDIAREMOTE_WATCH \(t) \(line)")
+            fflush(stdout)
+        }
+    }
+    RunLoop.main.run(until: started.addingTimeInterval(seconds))
+    out.fileHandleForReading.readabilityHandler = nil
+    // Closing stdin is the host's quit signal.
+    try? input.fileHandleForWriting.close()
+    process.waitUntilExit()
+    print("MEDIAREMOTE_WATCH end")
+}
+
 /// Same fixed perl program the app uses (`PerlMediaRemoteHost.perlScript`);
 /// duplicated so the probe stays dependency-free.
 enum MediaRemoteHostLauncher {
@@ -213,6 +264,10 @@ enum MediaRemoteHostLauncher {
 
 // -----------------------------------------------------------------------------
 
-probeSpotify()
-probeMediaRemote()
-probeMediaRemoteHost()
+if CommandLine.arguments.contains("--watch") {
+    watchMediaRemoteHost(seconds: 30)
+} else {
+    probeSpotify()
+    probeMediaRemote()
+    probeMediaRemoteHost()
+}

@@ -22,9 +22,10 @@ final class MediaRemoteSourceTests: XCTestCase {
         let (source, host) = make()
         var received: [MediaSnapshot] = []
         source.subscribe { received.append($0) }
-        host.emit(#"{"duration":226.5,"elapsed":83.25,"rate":1,"timestamp":1700000000,"title":"Song"}"#)
+        host.emit(#"{"bundle":"org.mozilla.firefox","duration":226.5,"elapsed":83.25,"rate":1,"timestamp":1700000000,"title":"Song"}"#)
         let s = source.snapshot
         XCTAssertEqual(s.identity, "browser")
+        XCTAssertEqual(s.sourceApp, "org.mozilla.firefox")
         XCTAssertEqual(s.state, .playing)
         XCTAssertEqual(s.elapsed, 83.25)
         XCTAssertEqual(s.duration, 226.5)

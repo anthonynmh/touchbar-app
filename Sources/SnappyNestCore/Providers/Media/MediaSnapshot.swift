@@ -12,6 +12,10 @@ public struct MediaSnapshot: Equatable {
     public let elapsedAt: Date?
     public let rate: Double
     public let title: String?
+    /// Bundle identifier of the application this snapshot describes, when
+    /// the source knows it. `MediaArbiter` uses it to spot the same player
+    /// reported by two sources.
+    public let sourceApp: String?
     public let canPlayPause: Bool
     public let canReadPosition: Bool
     public let canReadDuration: Bool
@@ -28,6 +32,7 @@ public struct MediaSnapshot: Equatable {
         elapsedAt: Date? = nil,
         rate: Double = 1,
         title: String? = nil,
+        sourceApp: String? = nil,
         canPlayPause: Bool = false,
         canReadPosition: Bool = false,
         canReadDuration: Bool = false,
@@ -41,6 +46,7 @@ public struct MediaSnapshot: Equatable {
         self.elapsedAt = elapsedAt
         self.rate = rate
         self.title = title
+        self.sourceApp = sourceApp
         self.canPlayPause = canPlayPause
         self.canReadPosition = canReadPosition
         self.canReadDuration = canReadDuration

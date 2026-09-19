@@ -36,6 +36,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private enum MediaChoice: String { case auto, spotify, browser }
     private var mediaChoice: MediaChoice = .auto
+    /// The source `currentMedia()` last picked in auto mode; `activeSource()`
+    /// follows it so commands go to the player the pet is showing, and the
+    /// arbiter keeps it on ties.
+    private var autoChoice: MediaArbiter.Choice?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSLog("[SnappyNest] launching")
@@ -248,13 +252,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .spotify: return mediaSpotify.snapshot
         case .browser: return mediaBrowser.snapshot
         case .auto:
-            let s = mediaSpotify.snapshot
-            let b = mediaBrowser.snapshot
-            if s.state == .playing { return s }
-            if b.state == .playing { return b }
-            if s.state == .paused  { return s }
-            if b.state == .paused  { return b }
-            return .unknown
+            let choice = MediaArbiter.choose(spotify: mediaSpotify.snapshot,
+                                             remote: mediaBrowser.snapshot,
+                                             previous: autoChoice)
+            if choice != autoChoice {
+                NSLog("[SnappyNest] auto media source=%@", String(describing: choice))
+            }
+            autoChoice = choice
+            switch choice {
+            case .spotify: return mediaSpotify.snapshot
+            case .remote:  return mediaBrowser.snapshot
+            case .none:    return .unknown
+            }
         }
     }
 
@@ -265,7 +274,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .auto:
             // The same source `currentMedia()` chose, so a seek or skip goes
             // to the player the pet is showing (paused Spotify included).
-            return currentMedia().identity == mediaSpotify.identity ? mediaSpotify : mediaBrowser
+            _ = currentMedia()
+            return autoChoice == .spotify ? mediaSpotify : mediaBrowser
         }
     }
 
