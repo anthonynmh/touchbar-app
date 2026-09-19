@@ -36,6 +36,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private enum MediaChoice: String { case auto, spotify, browser }
     private var mediaChoice: MediaChoice = .auto
+    private static let mediaChoiceKey = "mediaSource"
+    private static let petSpeciesKey = "petSpecies"
+    /// The source `currentMedia()` last picked in auto mode; `activeSource()`
+    /// follows it so commands go to the player the pet is showing, and the
+    /// arbiter keeps it on ties.
+    private var autoChoice: MediaArbiter.Choice?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSLog("[SnappyNest] launching")
@@ -57,10 +63,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         mediaBrowser = MediaRemoteSource(hostLibraryURL: hostLibrary)
         NSLog("[SnappyNest] providers ready")
 
+        // Preferences
+        let defaults = UserDefaults.standard
+        if let raw = defaults.string(forKey: Self.mediaChoiceKey), let c = MediaChoice(rawValue: raw) {
+            mediaChoice = c
+        }
+        let species = defaults.string(forKey: Self.petSpeciesKey).flatMap(PetSpecies.init(rawValue:)) ?? .cat
+
         // Scene
         let layout = LayoutEngine(bounds: touchBarBounds, backingScale: 2.0, page: page)
         composer = SceneComposer(layout: layout)
         pet = PetController(seed: seed, layout: layout.with(page: .world))
+        pet.setSpeciesImmediately(species)
 
         // Renderer + presenter
         renderer = SceneRenderer(frame: touchBarBounds)
@@ -159,6 +173,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         choiceHeader.submenu = choice
         menu.addItem(choiceHeader)
 
+        let petMenu = NSMenu(title: "Pet")
+        for species in PetSpecies.allCases {
+            let mi = NSMenuItem(title: species.displayName, action: #selector(pickPet(_:)), keyEquivalent: "")
+            mi.target = self
+            mi.representedObject = species.rawValue
+            mi.state = (species == pet.state.species) ? .on : .off
+            petMenu.addItem(mi)
+        }
+        let petHeader = NSMenuItem(title: "Pet", action: nil, keyEquivalent: "")
+        petHeader.submenu = petMenu
+        menu.addItem(petHeader)
+
         menu.addItem(NSMenuItem.separator())
         let quit = NSMenuItem(title: "Quit Snappy Nest", action: #selector(quit), keyEquivalent: "q")
         quit.target = self
@@ -248,13 +274,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .spotify: return mediaSpotify.snapshot
         case .browser: return mediaBrowser.snapshot
         case .auto:
-            let s = mediaSpotify.snapshot
-            let b = mediaBrowser.snapshot
-            if s.state == .playing { return s }
-            if b.state == .playing { return b }
-            if s.state == .paused  { return s }
-            if b.state == .paused  { return b }
-            return .unknown
+            let choice = MediaArbiter.choose(spotify: mediaSpotify.snapshot,
+                                             remote: mediaBrowser.snapshot,
+                                             previous: autoChoice)
+            if choice != autoChoice {
+                NSLog("[SnappyNest] auto media source=%@", String(describing: choice))
+            }
+            autoChoice = choice
+            switch choice {
+            case .spotify: return mediaSpotify.snapshot
+            case .remote:  return mediaBrowser.snapshot
+            case .none:    return .unknown
+            }
         }
     }
 
@@ -265,7 +296,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .auto:
             // The same source `currentMedia()` chose, so a seek or skip goes
             // to the player the pet is showing (paused Spotify included).
-            return currentMedia().identity == mediaSpotify.identity ? mediaSpotify : mediaBrowser
+            _ = currentMedia()
+            return autoChoice == .spotify ? mediaSpotify : mediaBrowser
         }
     }
 
@@ -389,9 +421,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let raw = sender.representedObject as? String,
               let c = MediaChoice(rawValue: raw) else { return }
         mediaChoice = c
+        UserDefaults.standard.set(c.rawValue, forKey: Self.mediaChoiceKey)
         if let siblings = sender.menu?.items {
             for it in siblings { it.state = (it == sender) ? .on : .off }
         }
+        renderOnce()
+    }
+
+    @objc private func pickPet(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String,
+              let species = PetSpecies(rawValue: raw) else { return }
+        UserDefaults.standard.set(species.rawValue, forKey: Self.petSpeciesKey)
+        if let siblings = sender.menu?.items {
+            for it in siblings { it.state = (it == sender) ? .on : .off }
+        }
+        pet.setSpecies(species, now: clock.now)
+        NSLog("[SnappyNest] pet species=%@", species.rawValue)
         renderOnce()
     }
 

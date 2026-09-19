@@ -17,6 +17,12 @@ final class SceneSnapshotTests: XCTestCase {
 
     func testWritePetClipSheet() throws {
         guard let dir = outputDir else { throw XCTSkip("SNAPPY_SNAPSHOT_DIR not set") }
+        for species in PetSpecies.allCases {
+            try writePetClipSheet(species, to: dir)
+        }
+    }
+
+    private func writePetClipSheet(_ species: PetSpecies, to dir: URL) throws {
         let cell = PetSprites.cellSize
         let actions = PetAction.allCases
         let maxFrames = actions.map(\.frameCount).max() ?? 1
@@ -28,7 +34,7 @@ final class SceneSnapshotTests: XCTestCase {
             for (row, action) in actions.enumerated() {
                 for frame in 0..<action.frameCount {
                     for (side, facing) in [PetFacing.right, .left].enumerated() {
-                        let img = PetSprites.image(action: action, frame: frame, facing: facing, scale: scale)
+                        let img = PetSprites.image(species: species, action: action, frame: frame, facing: facing, scale: scale)
                         let x = cell.width * CGFloat(frame + side * maxFrames)
                         let y = cell.height * CGFloat(row)
                         ctx.saveGState()
@@ -40,7 +46,7 @@ final class SceneSnapshotTests: XCTestCase {
                 }
             }
         }
-        try write(image, to: dir.appendingPathComponent("pet-clips.png"))
+        try write(image, to: dir.appendingPathComponent("pet-clips-\(species.rawValue).png"))
     }
 
     func testWriteGlyphSheet() throws {
@@ -67,7 +73,11 @@ final class SceneSnapshotTests: XCTestCase {
             SignpostGlyphs.image(.next, available: true, scale: scale),
             SignpostGlyphs.image(.next, available: false, scale: scale)
         ]
-        let sheet = CGSize(width: 32 * CGFloat(max(batteries.count, controls.count)), height: 64)
+        let banners = [
+            TitleBannerGlyph.image(width: 120, available: true, scale: scale),
+            TitleBannerGlyph.image(width: 120, available: false, scale: scale)
+        ]
+        let sheet = CGSize(width: 32 * CGFloat(max(batteries.count, controls.count)), height: 100)
         let image = PetSprites.render(size: sheet, scale: scale * 3) { ctx in
             ctx.setFillColor(CGColor(gray: 0.25, alpha: 1))
             ctx.fill(CGRect(origin: .zero, size: sheet))
@@ -84,6 +94,9 @@ final class SceneSnapshotTests: XCTestCase {
             }
             for (i, c) in controls.enumerated() {
                 blit(c, at: CGPoint(x: 2 + 32 * CGFloat(i), y: 36))
+            }
+            for (i, b) in banners.enumerated() {
+                blit(b, at: CGPoint(x: 2 + 130 * CGFloat(i), y: 66))
             }
         }
         try write(image, to: dir.appendingPathComponent("glyphs.png"))
@@ -138,13 +151,16 @@ final class SceneSnapshotTests: XCTestCase {
             try write(try snapshot(renderer), to: dir.appendingPathComponent(String(format: "controls-%02d00.png", hour)))
         }
 
-        // The playback page: following a track by day, and with nothing playing at night.
-        for (hour, playing) in [(12, true), (21, false)] {
+        // The playback page: following a track by day (short title), a long
+        // browser title in the evening, and nothing playing at night.
+        let titles = [12: "passport", 17: "honestav & mgk - Crash First (OFFICIAL MUSIC VIDEO) [4K Remaster]"]
+        for (hour, playing) in [(12, true), (17, true), (21, false)] {
             var comps = DateComponents(); comps.year = 2026; comps.month = 6; comps.day = 21; comps.hour = hour
             let now = cal.date(from: comps)!
             let playback = SceneComposer(layout: layout.with(page: .playback))
             let media = playing
                 ? MediaSnapshot(identity: "spotify", state: .playing, elapsed: 83, duration: 214, elapsedAt: now, rate: 1,
+                                title: titles[hour],
                                 canPlayPause: true, canReadPosition: true, canReadDuration: true, canSeek: true, canSkip: true)
                 : MediaSnapshot(identity: "spotify", state: .stopped, canPlayPause: true)
             let x = playing ? layout.trailX(fraction: 83.0 / 214.0, spriteHalfWidth: 12)

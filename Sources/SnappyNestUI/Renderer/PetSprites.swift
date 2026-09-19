@@ -2,20 +2,35 @@ import AppKit
 import CoreGraphics
 import SnappyNestCore
 
-/// Procedurally drawn pet: a round cat-like blob sized for the 30-point strip.
+/// Procedurally drawn pet sized for the 30-point strip.
 ///
-/// Every action maps to a pose + expression. Details are kept at 2×2 px or
-/// larger at 2× backing scale so they survive the Touch Bar's size; ears,
-/// eyes, mouth, and a few accents above the head carry the expression.
+/// Every action maps to a pose + expression (`pose(action:frame:)`), shared
+/// by every species; a `PetSpeciesDrawer` turns that pose into a body.
+/// Details are kept at 2×2 px or larger at 2× backing scale so they survive
+/// the Touch Bar's size; a few accents above the head carry the expression.
 ///
-/// Rendered images are cached per (action, frame, facing, scale).
+/// Rendered images are cached per (species, action, frame, facing, scale).
 public enum PetSprites {
     /// Sprite cell. The pet stands on the bottom edge; the top rows hold
     /// accents (`?`, `z`, sparkle) above the head.
     public static let cellSize = CGSize(width: 24, height: 24)
 
     /// Vertical lift (points, upward) applied by the renderer for hop frames.
-    public static func lift(action: PetAction, frame: Int) -> CGFloat {
+    public static func lift(species: PetSpecies = .cat, action: PetAction, frame: Int) -> CGFloat {
+        drawer(for: species).lift(action: action, frame: frame)
+    }
+
+    static func drawer(for species: PetSpecies) -> PetSpeciesDrawer.Type {
+        switch species {
+        case .cat:         return CatSprite.self
+        case .mecha:       return MechaSprite.self
+        case .cactus:      return CactusSprite.self
+        case .eldritchEye: return EldritchEyeSprite.self
+        }
+    }
+
+    /// The hop table the cat uses; species without their own reuse it.
+    static func defaultLift(action: PetAction, frame: Int) -> CGFloat {
         let f = frame % action.frameCount
         switch action {
         case .jump:      return [0, 4, 6, 3][f]
@@ -29,6 +44,7 @@ public enum PetSprites {
     }
 
     private struct Key: Hashable {
+        let species: PetSpecies
         let action: PetAction
         let frame: Int
         let facingRight: Bool
@@ -36,20 +52,23 @@ public enum PetSprites {
     }
     private static var cache: [Key: CGImage] = [:]
 
-    public static func image(action: PetAction, frame: Int, facing: PetFacing, scale: CGFloat) -> CGImage {
-        let key = Key(action: action, frame: frame % action.frameCount, facingRight: facing == .right, scale: scale)
+    public static func image(species: PetSpecies = .cat, action: PetAction, frame: Int,
+                             facing: PetFacing, scale: CGFloat) -> CGImage {
+        let key = Key(species: species, action: action, frame: frame % action.frameCount,
+                      facingRight: facing == .right, scale: scale)
         if let hit = cache[key] { return hit }
+        let p = pose(action: action, frame: key.frame)
         let img = render(size: cellSize, scale: scale) { ctx in
             ctx.saveGState()
             if !key.facingRight {
                 ctx.translateBy(x: cellSize.width, y: 0)
                 ctx.scaleBy(x: -1, y: 1)
             }
-            draw(ctx: ctx, action: action, frame: key.frame)
+            drawer(for: species).draw(ctx: ctx, pose: p, frame: key.frame)
             ctx.restoreGState()
             // Glyphs above the head are text-like, so never mirror them.
             let accentX = key.facingRight ? cellSize.width / 2 + 6 : cellSize.width / 2 - 10
-            drawAccent(ctx, pose(action: action, frame: key.frame).accent, aboveX: accentX, topY: 0, frame: key.frame)
+            drawAccent(ctx, p.accent, aboveX: accentX, topY: 0, frame: key.frame)
         }
         cache[key] = img
         return img
@@ -57,10 +76,10 @@ public enum PetSprites {
 
     // MARK: - Pose model
 
-    private enum Eyes { case open, wide, closed, squint, happy, up, side }
-    private enum Mouth { case none, smile, open, small }
+    enum Eyes { case open, wide, closed, squint, happy, up, side }
+    enum Mouth { case none, smile, open, small }
 
-    private struct Pose {
+    struct Pose {
         var eyes: Eyes = .open
         var mouth: Mouth = .small
         var earLift: CGFloat = 0        // ears up (+) or flat (−)
@@ -79,9 +98,9 @@ public enum PetSprites {
         var poof = 0                    // teleport sparkle burst radius step (0 = none)
     }
 
-    private enum Accent { case none, question, sparkle, star, zee, note, heart, droplets, exclaim }
+    enum Accent { case none, question, sparkle, star, zee, note, heart, droplets, exclaim }
 
-    private static func pose(action: PetAction, frame f: Int) -> Pose {
+    static func pose(action: PetAction, frame f: Int) -> Pose {
         var p = Pose()
         switch action {
         case .idle:
@@ -203,160 +222,12 @@ public enum PetSprites {
         return p
     }
 
-    // MARK: - Drawing (cell is 24×24, y grows downward)
+    // MARK: - Shared drawing (cell is 24×24, y grows downward)
 
-    private static let outline = Palette.brown
-    private static let fur = Palette.tangerine
-    private static let furLight = CGColor(red: 0xFF/255, green: 0xA4/255, blue: 0x4A/255, alpha: 1)
-    private static let belly = Palette.cream
-    private static let blushPink = CGColor(red: 0xF2/255, green: 0x6A/255, blue: 0x6A/255, alpha: 0.85)
+    static let outline = Palette.brown
+    static let blushPink = CGColor(red: 0xF2/255, green: 0x6A/255, blue: 0x6A/255, alpha: 0.85)
 
-    private static func draw(ctx: CGContext, action: PetAction, frame: Int) {
-        let p = pose(action: action, frame: frame)
-        let W = cellSize.width
-        let ground = cellSize.height           // feet touch the bottom edge
-
-        if p.bodyHidden {
-            drawPoof(ctx, step: p.poof, centerX: W / 2, ground: ground)
-            return
-        }
-        defer { if p.poof > 0 { drawPoof(ctx, step: p.poof, centerX: W / 2, ground: ground) } }
-
-        // Body: a rounded blob. Width/height flex with the pose.
-        let bw = 18 + p.bodyDX
-        let bh = 14 + p.bodyDY
-        let bx = (W - bw) / 2
-        let by = ground - bh - 1               // 1 px for the feet
-        let body = CGRect(x: bx, y: by, width: bw, height: bh)
-
-        // Tail (behind the body on the left = back side when facing right)
-        ctx.setFillColor(outline)
-        if p.tailUp {
-            ctx.fillEllipse(in: CGRect(x: bx - 3, y: by + 3, width: 6, height: 6))
-            ctx.setFillColor(fur)
-            ctx.fillEllipse(in: CGRect(x: bx - 2, y: by + 4, width: 4, height: 4))
-        } else {
-            ctx.fill(CGRect(x: bx - 3, y: ground - 4, width: 5, height: 3))
-            ctx.setFillColor(fur)
-            ctx.fill(CGRect(x: bx - 2, y: ground - 3, width: 3, height: 1))
-        }
-
-        // Feet
-        ctx.setFillColor(outline)
-        let footY = ground - 2
-        switch p.legs {
-        case 1:
-            ctx.fill(CGRect(x: bx + 3, y: footY, width: 4, height: 2))
-            ctx.fill(CGRect(x: bx + bw - 6, y: footY - 1, width: 4, height: 2))
-        case 2:
-            ctx.fill(CGRect(x: bx + 3, y: footY - 1, width: 4, height: 2))
-            ctx.fill(CGRect(x: bx + bw - 6, y: footY, width: 4, height: 2))
-        default:
-            ctx.fill(CGRect(x: bx + 3, y: footY, width: 4, height: 2))
-            ctx.fill(CGRect(x: bx + bw - 7, y: footY, width: 4, height: 2))
-        }
-
-        // Ears: two triangles on top of the body.
-        let earBaseY = by + 4
-        let earH: CGFloat = 6 + p.earLift * 2
-        for (i, earX) in [bx + 2, bx + bw - 8].enumerated() {
-            let tilt: CGFloat = i == 0 ? -1 : 1
-            drawTriangle(ctx, CGPoint(x: earX, y: earBaseY),
-                         CGPoint(x: earX + 6, y: earBaseY),
-                         CGPoint(x: earX + 3 + tilt, y: earBaseY - earH), fill: outline)
-            drawTriangle(ctx, CGPoint(x: earX + 1, y: earBaseY),
-                         CGPoint(x: earX + 5, y: earBaseY),
-                         CGPoint(x: earX + 3 + tilt, y: earBaseY - earH + 2), fill: fur)
-        }
-
-        // Body outline + fill, with a light top highlight and cream belly.
-        ctx.saveGState()
-        if p.lean != 0 {
-            // Skew the top of the body forward for dashes.
-            let t = CGAffineTransform(a: 1, b: 0, c: p.lean / bh, d: 1, tx: -p.lean * (ground / bh) , ty: 0)
-            ctx.concatenate(t)
-        }
-        ctx.setFillColor(outline)
-        ctx.fillEllipse(in: body.insetBy(dx: -1, dy: -1))
-        ctx.setFillColor(fur)
-        ctx.fillEllipse(in: body)
-        ctx.setFillColor(furLight)
-        ctx.fillEllipse(in: CGRect(x: body.minX + 3, y: body.minY + 1, width: body.width - 6, height: 4))
-        ctx.setFillColor(belly)
-        ctx.fillEllipse(in: CGRect(x: body.midX - 4, y: body.maxY - 6, width: 8, height: 5))
-        ctx.restoreGState()
-
-        // Face: eyes sit in the upper half, toward the facing side.
-        let eyeY = body.minY + 4
-        let leftEyeX = body.midX - 5
-        let rightEyeX = body.midX + 2
-        drawEyes(ctx, p.eyes, leftX: leftEyeX, rightX: rightEyeX, y: eyeY)
-
-        if p.blush {
-            ctx.setFillColor(blushPink)
-            ctx.fill(CGRect(x: leftEyeX - 1, y: eyeY + 5, width: 2, height: 2))
-            ctx.fill(CGRect(x: rightEyeX + 3, y: eyeY + 5, width: 2, height: 2))
-        }
-
-        // Mouth
-        ctx.setFillColor(outline)
-        let mouthY = eyeY + 6
-        switch p.mouth {
-        case .none: break
-        case .small:
-            ctx.fill(CGRect(x: body.midX - 1, y: mouthY, width: 2, height: 1))
-        case .smile:
-            ctx.fill(CGRect(x: body.midX - 2, y: mouthY, width: 4, height: 1))
-            ctx.fill(CGRect(x: body.midX - 3, y: mouthY - 1, width: 1, height: 1))
-            ctx.fill(CGRect(x: body.midX + 2, y: mouthY - 1, width: 1, height: 1))
-        case .open:
-            ctx.fillEllipse(in: CGRect(x: body.midX - 1.5, y: mouthY - 0.5, width: 3, height: 3))
-        }
-
-        // Spanner held out on the facing side, at belly height.
-        if p.spanner {
-            let sx = body.maxX - 2
-            let sy = body.midY + 1 + p.spannerTilt
-            ctx.setFillColor(outline)
-            ctx.fill(CGRect(x: sx - 1, y: sy - 1, width: 8, height: 4))
-            ctx.setFillColor(Palette.cream)
-            ctx.fill(CGRect(x: sx, y: sy, width: 5, height: 2))
-            ctx.fill(CGRect(x: sx + 5, y: sy - 1, width: 2, height: 4))
-            ctx.setFillColor(outline)
-            ctx.fill(CGRect(x: sx + 6, y: sy, width: 1, height: 2))   // open jaw
-        }
-
-        // Hard hat: a golden dome with a brim, sitting on the head between the
-        // ears. `lift` raises it for the drop-on / pop-off clips.
-        if let lift = p.hat {
-            let hatW: CGFloat = 14
-            let hx = body.midX - hatW / 2
-            let brimY = by - 1 - lift
-            ctx.saveGState()
-            ctx.clip(to: CGRect(x: 0, y: -20, width: W, height: brimY + 20))
-            ctx.setFillColor(outline)
-            ctx.fillEllipse(in: CGRect(x: hx + 1, y: brimY - 7, width: hatW - 2, height: 14))
-            ctx.setFillColor(Palette.golden)
-            ctx.fillEllipse(in: CGRect(x: hx + 2, y: brimY - 6, width: hatW - 4, height: 12))
-            ctx.setFillColor(Palette.cream)
-            ctx.fill(CGRect(x: hx + 4, y: brimY - 4, width: 2, height: 2))
-            ctx.restoreGState()
-            ctx.setFillColor(outline)
-            ctx.fill(CGRect(x: hx - 1, y: brimY - 1, width: hatW + 2, height: 3))
-            ctx.setFillColor(Palette.golden)
-            ctx.fill(CGRect(x: hx, y: brimY, width: hatW, height: 1))
-        }
-
-        // Speed lines trail behind a dashing pet.
-        if p.speedLines {
-            ctx.setFillColor(Palette.cream.copy(alpha: 0.8) ?? Palette.cream)
-            ctx.fill(CGRect(x: 0, y: by + 4, width: 4, height: 1))
-            ctx.fill(CGRect(x: 1, y: by + 8, width: 3, height: 1))
-        }
-
-    }
-
-    private static func drawEyes(_ ctx: CGContext, _ eyes: Eyes, leftX: CGFloat, rightX: CGFloat, y: CGFloat) {
+    static func drawEyes(_ ctx: CGContext, _ eyes: Eyes, leftX: CGFloat, rightX: CGFloat, y: CGFloat) {
         func eye(_ x: CGFloat) {
             switch eyes {
             case .open, .side, .up:
@@ -394,9 +265,37 @@ public enum PetSprites {
         eye(rightX)
     }
 
+    /// Hard hat: a golden dome with a brim, 14 wide, centred on `midX` with
+    /// the brim's top row at `brimY`. The dome is clipped to the brim so a
+    /// lifted hat (drop-on / pop-off clips) never draws below it.
+    static func drawHardHat(_ ctx: CGContext, midX: CGFloat, brimY: CGFloat) {
+        let hatW: CGFloat = 14
+        let hx = midX - hatW / 2
+        ctx.saveGState()
+        ctx.clip(to: CGRect(x: 0, y: -20, width: cellSize.width, height: brimY + 20))
+        ctx.setFillColor(outline)
+        ctx.fillEllipse(in: CGRect(x: hx + 1, y: brimY - 7, width: hatW - 2, height: 14))
+        ctx.setFillColor(Palette.golden)
+        ctx.fillEllipse(in: CGRect(x: hx + 2, y: brimY - 6, width: hatW - 4, height: 12))
+        ctx.setFillColor(Palette.cream)
+        ctx.fill(CGRect(x: hx + 4, y: brimY - 4, width: 2, height: 2))
+        ctx.restoreGState()
+        ctx.setFillColor(outline)
+        ctx.fill(CGRect(x: hx - 1, y: brimY - 1, width: hatW + 2, height: 3))
+        ctx.setFillColor(Palette.golden)
+        ctx.fill(CGRect(x: hx, y: brimY, width: hatW, height: 1))
+    }
+
+    /// Speed lines trail behind a dashing pet, at the left (back) edge.
+    static func drawSpeedLines(_ ctx: CGContext, topY: CGFloat) {
+        ctx.setFillColor(Palette.cream.copy(alpha: 0.8) ?? Palette.cream)
+        ctx.fill(CGRect(x: 0, y: topY, width: 4, height: 1))
+        ctx.fill(CGRect(x: 1, y: topY + 4, width: 3, height: 1))
+    }
+
     /// Teleport sparkles: four cream flecks flying outward from the body's
     /// centre, farther each step, with a faint ring on the last step.
-    private static func drawPoof(_ ctx: CGContext, step: Int, centerX cx: CGFloat, ground: CGFloat) {
+    static func drawPoof(_ ctx: CGContext, step: Int, centerX cx: CGFloat, ground: CGFloat) {
         guard step > 0 else { return }
         let cy = ground - 8
         let r = CGFloat(2 + step * 2)
@@ -465,7 +364,7 @@ public enum PetSprites {
         }
     }
 
-    private static func drawTriangle(_ ctx: CGContext, _ a: CGPoint, _ b: CGPoint, _ c: CGPoint, fill: CGColor) {
+    static func drawTriangle(_ ctx: CGContext, _ a: CGPoint, _ b: CGPoint, _ c: CGPoint, fill: CGColor) {
         ctx.setFillColor(fill)
         ctx.beginPath()
         ctx.move(to: a); ctx.addLine(to: b); ctx.addLine(to: c); ctx.closePath()
@@ -489,4 +388,13 @@ public enum PetSprites {
         drawing(ctx)
         return ctx.makeImage()!
     }
+}
+
+/// One body per species. `draw` renders the given pose into the 24×24 cell
+/// with the feet on the bottom edge and must be a pure function of the
+/// pose, so `teleportIn` frame 3 lands on exactly the `idle` frame 0 image.
+protocol PetSpeciesDrawer {
+    static func draw(ctx: CGContext, pose: PetSprites.Pose, frame: Int)
+    /// Vertical lift for hop frames (see `PetSprites.defaultLift`).
+    static func lift(action: PetAction, frame: Int) -> CGFloat
 }

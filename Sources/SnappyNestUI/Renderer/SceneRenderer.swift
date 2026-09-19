@@ -34,6 +34,8 @@ public final class SceneRenderer: NSView {
     private let nextSignLayer = CALayer()
     private let elapsedTextLayer = CATextLayer()
     private let durationTextLayer = CATextLayer()
+    private let titleBannerLayer = CALayer()
+    private let titleTextLayer = CATextLayer()
 
     private let controlsContainer = CALayer()
     private let controlsTerrainLayer = CALayer()
@@ -146,7 +148,8 @@ public final class SceneRenderer: NSView {
         let playbackLayers: [CALayer] = [
             playbackTerrainLayer, trailLayer, trailCentreLayer, trailFillLayer,
             previousSignLayer, playPauseSignLayer, nextSignLayer,
-            elapsedTextLayer, durationTextLayer
+            elapsedTextLayer, durationTextLayer,
+            titleBannerLayer, titleTextLayer
         ]
         let controlLayers: [CALayer] = [
             controlsTerrainLayer,
@@ -215,6 +218,14 @@ public final class SceneRenderer: NSView {
         }
         clockTextLayer.font = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .semibold)
         clockTextLayer.fontSize = 10
+        // The title is prose, not digits, and long titles are cut with an ellipsis.
+        titleTextLayer.alignmentMode = .center
+        titleTextLayer.truncationMode = .end
+        titleTextLayer.isWrapped = false
+        titleTextLayer.foregroundColor = Palette.cream
+        titleTextLayer.contentsScale = backingScale
+        titleTextLayer.font = Self.titleFont
+        titleTextLayer.fontSize = 9
         clockPillLayer.backgroundColor = CGColor(red: 0x18/255, green: 0x14/255, blue: 0x0F/255, alpha: 0.82)
         clockPillLayer.cornerRadius = 5
         clockPillLayer.borderWidth = 1
@@ -258,6 +269,7 @@ public final class SceneRenderer: NSView {
         paintTrail(model: model, regions: playback)
         paintSignposts(media: model.media, regions: playback)
         paintTimeLabels(model: model, regions: playback)
+        paintTitleBanner(model: model, regions: playback)
         paintControlsTerrain(regions: controls, time: model.time)
         paintBattery(model.battery, regions: controls)
         paintBrightness(value: model.brightness, available: model.brightnessAvailable, regions: controls)
@@ -442,6 +454,7 @@ public final class SceneRenderer: NSView {
     // MARK: - Playback page
 
     private static let timeFont = NSFont.monospacedDigitSystemFont(ofSize: 9, weight: .semibold)
+    private static let titleFont = NSFont.systemFont(ofSize: 9, weight: .semibold)
 
     private var petHalfWidth: CGFloat { PetSprites.cellSize.width / 2 }
 
@@ -502,6 +515,35 @@ public final class SceneRenderer: NSView {
         }
     }
 
+    /// The title shown on the sign: only while something is playing or
+    /// paused; the media snapshot is the only source, never a pending seek.
+    static func bannerTitle(_ media: MediaSnapshot) -> String? {
+        guard media.state == .playing || media.state == .paused else { return nil }
+        guard let title = media.title?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty else { return nil }
+        return title
+    }
+
+    private func paintTitleBanner(model: SceneModel, regions: LayoutEngine.Regions) {
+        let r = regions.titleBanner
+        let title = Self.bannerTitle(model.media)
+        titleBannerLayer.contents = TitleBannerGlyph.image(width: r.width, available: title != nil, scale: backingScale)
+        titleBannerLayer.frame = CGRect(x: r.minX.rounded(), y: r.maxY - TitleBannerGlyph.height,
+                                        width: r.width.rounded(), height: TitleBannerGlyph.height)
+        let plank = TitleBannerGlyph.plankRect(width: r.width.rounded())
+        titleTextLayer.frame = CGRect(x: titleBannerLayer.frame.minX + plank.minX + 5,
+                                      y: (titleBannerLayer.frame.minY + plank.midY - 6).rounded(),
+                                      width: plank.width - 10, height: 12)
+        // Only swap the string when it changes: CATextLayer re-rasterises on
+        // set. Short titles sit centred on the plank; long ones start at the
+        // left so the ellipsis cuts the tail, not the head.
+        let shown = title ?? ""
+        if (titleTextLayer.string as? String) != shown {
+            titleTextLayer.string = shown
+            let width = (shown as NSString).size(withAttributes: [.font: Self.titleFont]).width
+            titleTextLayer.alignmentMode = width <= titleTextLayer.frame.width ? .center : .left
+        }
+    }
+
     /// `m:ss`, or an em-dash placeholder when unknown.
     static func timeString(_ seconds: TimeInterval?) -> String {
         guard let s = seconds, s.isFinite, s >= 0 else { return "–:––" }
@@ -515,6 +557,7 @@ public final class SceneRenderer: NSView {
     private func paintPet(state: PetState) {
         let size = PetSprites.cellSize
         petLayer.contents = PetSprites.image(
+            species: state.species,
             action: state.action,
             frame: state.frameIndex,
             facing: state.facing,
@@ -522,7 +565,7 @@ public final class SceneRenderer: NSView {
         )
         // Anchor: horizontal center of sprite, feet on the ground line. Hop
         // frames lift the whole cell.
-        let lift = PetSprites.lift(action: state.action, frame: state.frameIndex)
+        let lift = PetSprites.lift(species: state.species, action: state.action, frame: state.frameIndex)
         let x = (state.position.x - size.width / 2).rounded()
         let y = state.position.y - size.height - lift
         petLayer.frame = CGRect(x: x, y: y, width: size.width, height: size.height)

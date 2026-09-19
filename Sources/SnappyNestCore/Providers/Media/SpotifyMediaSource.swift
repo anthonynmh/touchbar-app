@@ -33,7 +33,7 @@ internal struct SpotifyDispatch {
 /// nothing here sends an event unless the source's policy says Spotify is
 /// alive. The script's own `is running` guard is only a second line of defence.
 private final class SystemSpotifyScriptingBridge: SpotifyScriptingBridge {
-    static let bundleID = "com.spotify.client"
+    static let bundleID = SpotifyMediaSource.bundleID
 
     private static let scriptSource = """
     if application "Spotify" is not running then
@@ -174,6 +174,10 @@ private final class SystemSpotifyScriptingBridge: SpotifyScriptingBridge {
 /// `quiesceInterval` instead. Polling only runs while Spotify is running.
 public final class SpotifyMediaSource: MediaSource {
     public let identity = "spotify"
+    /// Every snapshot carries this as `sourceApp` so `MediaArbiter` can
+    /// recognise Spotify when mediaremoted reports it through the
+    /// MediaRemote source as well.
+    public static let bundleID = "com.spotify.client"
     public private(set) var snapshot: MediaSnapshot = .unknown
 
     internal static let quiesceInterval: TimeInterval = 3.0
@@ -271,7 +275,7 @@ public final class SpotifyMediaSource: MediaSource {
         if playerState == "Stopped" {
             // Spotify posts this while quitting. Any Apple event now relaunches it.
             suppressScripting()
-            publish(MediaSnapshot(identity: identity, state: .stopped, canPlayPause: true))
+            publish(MediaSnapshot(identity: identity, state: .stopped, sourceApp: Self.bundleID, canPlayPause: true))
             return
         }
         refresh()
@@ -309,7 +313,7 @@ public final class SpotifyMediaSource: MediaSource {
             // An AppleScript error mid-poll usually means the process is going
             // away; back off rather than retry into a launch.
             suppressScripting()
-            publish(MediaSnapshot(identity: identity, state: .unknown))
+            publish(MediaSnapshot(identity: identity, state: .unknown, sourceApp: Self.bundleID))
             return
         }
         if raw == "not_running" {
@@ -320,7 +324,7 @@ public final class SpotifyMediaSource: MediaSource {
     }
 
     internal static func notRunningSnapshot(identity: String) -> MediaSnapshot {
-        MediaSnapshot(identity: identity, state: .stopped, canPlayPause: true,
+        MediaSnapshot(identity: identity, state: .stopped, sourceApp: bundleID, canPlayPause: true,
                       canReadPosition: false, canReadDuration: false)
     }
 
@@ -346,6 +350,7 @@ public final class SpotifyMediaSource: MediaSource {
             elapsedAt: date,
             rate: 1,
             title: name.isEmpty ? nil : name,
+            sourceApp: bundleID,
             canPlayPause: true,
             canReadPosition: pos >= 0,
             canReadDuration: dur > 0,

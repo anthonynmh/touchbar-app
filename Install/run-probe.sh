@@ -12,6 +12,7 @@
 #   ./Install/run-probe.sh 03 --write
 #   ./Install/run-probe.sh 04 --write [--allow-unmute]
 #   ./Install/run-probe.sh 05   # Spotify + MediaRemote (in-process and perl-hosted)
+#   ./Install/run-probe.sh 05 --watch   # 05d: stream the host for 30 s (launch Spotify meanwhile)
 
 set -euo pipefail
 
@@ -35,9 +36,15 @@ esac
 
 WRITE=0
 ALLOW_UNMUTE=0
+WATCH=0
 PROBE_ARGS=()
 for argument in "$@"; do
     case "$argument" in
+        --watch)
+            [ "$WATCH" = "0" ] || { echo "error: duplicate --watch" >&2; exit 2; }
+            WATCH=1
+            PROBE_ARGS+=("$argument")
+            ;;
         --write)
             [ "$WRITE" = "0" ] || { echo "error: duplicate --write" >&2; exit 2; }
             WRITE=1
@@ -53,13 +60,27 @@ for argument in "$@"; do
 done
 
 case "$NN" in
+    05)
+        if [ "$WRITE" = "1" ] || [ "$ALLOW_UNMUTE" = "1" ]; then
+            echo "error: write flags are valid only for Probes 03 and 04" >&2
+            exit 2
+        fi
+        ;;
     03)
+        if [ "$WATCH" = "1" ]; then
+            echo "error: --watch is valid only for Probe 05" >&2
+            exit 2
+        fi
         if [ "$ALLOW_UNMUTE" = "1" ]; then
             echo "error: --allow-unmute is valid only for Probe 04" >&2
             exit 2
         fi
         ;;
     04)
+        if [ "$WATCH" = "1" ]; then
+            echo "error: --watch is valid only for Probe 05" >&2
+            exit 2
+        fi
         if [ "$ALLOW_UNMUTE" = "1" ] && [ "$WRITE" != "1" ]; then
             echo "error: --allow-unmute requires --write" >&2
             exit 2
@@ -67,7 +88,7 @@ case "$NN" in
         ;;
     *)
         if [ "${#PROBE_ARGS[@]}" -ne 0 ]; then
-            echo "error: write flags are valid only for Probes 03 and 04" >&2
+            echo "error: flags are valid only for Probes 03, 04 and 05" >&2
             exit 2
         fi
         ;;

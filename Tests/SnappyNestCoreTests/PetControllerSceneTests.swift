@@ -167,6 +167,48 @@ final class PetControllerSceneTests: XCTestCase {
         XCTAssertGreaterThan(positions.count, 10)
     }
 
+    func testChangingSpeciesPoofsOutAndLandsAsTheNewBody() {
+        let c = PetController(seed: 7, layout: layout())
+        XCTAssertEqual(c.state.species, .cat)
+        c.setSpecies(.mecha, now: t0)
+        XCTAssertEqual(c.state.action, .teleportOut)
+        XCTAssertEqual(c.state.species, .cat, "the old body poofs out")
+        c.tick(now: t0.addingTimeInterval(PetController.teleportDuration), media: .unknown)
+        XCTAssertEqual(c.state.action, .teleportIn)
+        XCTAssertEqual(c.state.species, .mecha, "the new body poofs in")
+        XCTAssertEqual(c.mode, .roam)
+        _ = run(c, from: t0.addingTimeInterval(PetController.teleportDuration), seconds: PetController.teleportDuration + 0.5)
+        XCTAssertFalse(c.state.action.isTeleporting)
+        XCTAssertEqual(c.state.species, .mecha)
+    }
+
+    func testChangingSpeciesInTheWorkshopTakesTheHatOffFirstAndComesBackTinkering() {
+        let c = PetController(seed: 7, layout: layout())
+        c.enter(.workshop, now: t0)
+        let end = run(c, from: t0, seconds: 30)
+        XCTAssertEqual(c.state.action, .tinker)
+        c.setSpecies(.cactus, now: end)
+        XCTAssertEqual(c.state.action, .suitDown)
+        let settled = run(c, from: end, seconds: PetController.suitDuration + 2 * PetController.teleportDuration + 5)
+        _ = settled
+        XCTAssertEqual(c.state.species, .cactus)
+        XCTAssertEqual(c.mode, .workshop)
+        XCTAssertEqual(c.state.action, .tinker)
+        XCTAssertEqual(c.state.position.x, c.workshopX, accuracy: 1e-6)
+    }
+
+    func testSpeciesChangeMidTransitionRetargetsAndSameSpeciesIsANoOp() {
+        let c = PetController(seed: 7, layout: layout())
+        c.setSpecies(.mecha, now: t0)
+        c.setSpecies(.eldritchEye, now: t0.addingTimeInterval(0.1))
+        _ = run(c, from: t0, seconds: 2 * PetController.teleportDuration + 0.5)
+        XCTAssertEqual(c.state.species, .eldritchEye)
+        let action = c.state.action
+        c.setSpecies(.eldritchEye, now: t0.addingTimeInterval(5))
+        XCTAssertEqual(c.state.action, action, "same species: nothing happens")
+        XCTAssertFalse(c.state.action.isTeleporting)
+    }
+
     func testEnteringTheSameModeTwiceIsANoOp() {
         let c = PetController(seed: 7, layout: layout())
         c.enter(.workshop, now: t0)

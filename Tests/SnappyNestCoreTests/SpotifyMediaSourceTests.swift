@@ -54,6 +54,7 @@ final class SpotifyMediaSourceTests: XCTestCase {
         XCTAssertFalse(source.isPolling)
         XCTAssertEqual(source.snapshot.state, .stopped)
         XCTAssertTrue(source.snapshot.canPlayPause)
+        XCTAssertEqual(source.snapshot.sourceApp, SpotifyMediaSource.bundleID)
         source.pollTick()
         XCTAssertEqual(bridge.readCount, 0)
     }
@@ -68,6 +69,7 @@ final class SpotifyMediaSourceTests: XCTestCase {
         XCTAssertEqual(source.snapshot.elapsed, 30)
         XCTAssertEqual(source.snapshot.duration, 300)
         XCTAssertEqual(source.snapshot.title, "Song")
+        XCTAssertEqual(source.snapshot.sourceApp, SpotifyMediaSource.bundleID)
         XCTAssertTrue(source.snapshot.canFollowProgress)
     }
 

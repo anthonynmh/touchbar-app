@@ -86,6 +86,12 @@ final class SceneRendererInteractionTests: XCTestCase {
         renderer.handleTap(at: CGPoint(x: pet.midX, y: pet.midY))
         XCTAssertEqual(petTaps, 1)
 
+        // The title sign is not part of the trail: tapping it never seeks.
+        seek = nil
+        renderer.handleTap(at: CGPoint(x: model.layout.titleBanner.midX, y: 15))
+        XCTAssertNil(seek)
+        XCTAssertEqual(petTaps, 1)
+
         // Media that cannot seek: trail taps do nothing.
         seek = nil
         let noSeek = MediaSnapshot(identity: "browser", state: .playing, elapsed: 1, duration: 2, elapsedAt: Date(),

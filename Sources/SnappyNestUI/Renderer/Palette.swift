@@ -31,4 +31,17 @@ public enum Palette {
     public static let batteryEmpty   = CGColor(red: 0x24/255, green: 0x2A/255, blue: 0x24/255, alpha: 1)
     public static let batteryLow     = CGColor(red: 0xE0/255, green: 0x62/255, blue: 0x30/255, alpha: 1)
     public static let unavailableTint = CGColor(red: 0.4, green: 0.4, blue: 0.4, alpha: 1)
+
+    // Pet species. The cat uses tangerine/cream/brown above.
+    public static let steel       = CGColor(red: 0xB8/255, green: 0xC0/255, blue: 0xCC/255, alpha: 1)
+    public static let steelDark   = CGColor(red: 0x4E/255, green: 0x56/255, blue: 0x63/255, alpha: 1)
+    public static let mechaRed    = CGColor(red: 0xD6/255, green: 0x3A/255, blue: 0x2F/255, alpha: 1)
+    public static let cactusGreen = CGColor(red: 0x4F/255, green: 0x9A/255, blue: 0x3C/255, alpha: 1)
+    public static let cactusLight = CGColor(red: 0x7C/255, green: 0xC4/255, blue: 0x5E/255, alpha: 1)
+    public static let cactusDark  = CGColor(red: 0x24/255, green: 0x55/255, blue: 0x1E/255, alpha: 1)
+    public static let clay        = CGColor(red: 0xB5/255, green: 0x55/255, blue: 0x2E/255, alpha: 1)
+    public static let clayDark    = CGColor(red: 0x6E/255, green: 0x2E/255, blue: 0x16/255, alpha: 1)
+    public static let ichor       = CGColor(red: 0x5A/255, green: 0x2D/255, blue: 0x82/255, alpha: 1)
+    public static let ichorDark   = CGColor(red: 0x22/255, green: 0x0F/255, blue: 0x38/255, alpha: 1)
+    public static let vein        = CGColor(red: 0xC4/255, green: 0x30/255, blue: 0x30/255, alpha: 1)
 }

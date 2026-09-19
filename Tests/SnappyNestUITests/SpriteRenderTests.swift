@@ -13,17 +13,30 @@ final class SpriteRenderTests: XCTestCase {
     }
 
     func testEveryPetClipFrameRendersInsideTheCell() {
-        for action in PetAction.allCases {
-            for frame in 0..<action.frameCount {
-                for facing in [PetFacing.left, .right] {
-                    let img = PetSprites.image(action: action, frame: frame, facing: facing, scale: scale)
-                    XCTAssertEqual(CGFloat(img.width), PetSprites.cellSize.width * scale, "\(action) frame \(frame)")
-                    XCTAssertEqual(CGFloat(img.height), PetSprites.cellSize.height * scale)
-                    XCTAssertTrue(isNonEmpty(img), "\(action) frame \(frame) \(facing) drew nothing")
-                    XCTAssertGreaterThanOrEqual(PetSprites.lift(action: action, frame: frame), 0)
+        for species in PetSpecies.allCases {
+            for action in PetAction.allCases {
+                for frame in 0..<action.frameCount {
+                    for facing in [PetFacing.left, .right] {
+                        let img = PetSprites.image(species: species, action: action, frame: frame, facing: facing, scale: scale)
+                        XCTAssertEqual(CGFloat(img.width), PetSprites.cellSize.width * scale, "\(species) \(action) frame \(frame)")
+                        XCTAssertEqual(CGFloat(img.height), PetSprites.cellSize.height * scale)
+                        XCTAssertTrue(isNonEmpty(img), "\(species) \(action) frame \(frame) \(facing) drew nothing")
+                        XCTAssertGreaterThanOrEqual(PetSprites.lift(species: species, action: action, frame: frame), 0)
+                    }
                 }
             }
         }
+    }
+
+    func testSpeciesLookDifferentAndAreCachedApart() {
+        let idle = PetSpecies.allCases.map { PetSprites.image(species: $0, action: .idle, frame: 0, facing: .right, scale: scale) }
+        for (i, a) in idle.enumerated() {
+            for b in idle[(i + 1)...] {
+                XCTAssertNotEqual(a.dataProvider?.data as Data?, b.dataProvider?.data as Data?,
+                                  "\(PetSpecies.allCases[i]) must not look like another species")
+            }
+        }
+        XCTAssertTrue(PetSprites.image(action: .idle, frame: 0, facing: .right, scale: scale) === idle[0], "default is the cat")
     }
 
     func testPetImagesAreCachedPerFrame() {
@@ -69,6 +82,30 @@ final class SpriteRenderTests: XCTestCase {
                        === ControlGlyphs.volume(level: 0.8, muted: false, available: true, scale: scale))
     }
 
+    func testTitleBannerGlyphStates() {
+        let shown = TitleBannerGlyph.image(width: 326, available: true, scale: scale)
+        let empty = TitleBannerGlyph.image(width: 326, available: false, scale: scale)
+        XCTAssertTrue(isNonEmpty(shown))
+        XCTAssertTrue(isNonEmpty(empty))
+        XCTAssertEqual(shown.width, Int(326 * scale))
+        XCTAssertEqual(shown.height, Int(TitleBannerGlyph.height * scale))
+        XCTAssertNotEqual(shown.dataProvider?.data as Data?, empty.dataProvider?.data as Data?,
+                          "an empty sign is drawn darker")
+        XCTAssertTrue(shown === TitleBannerGlyph.image(width: 326, available: true, scale: scale), "cached")
+        let plank = TitleBannerGlyph.plankRect(width: 326)
+        XCTAssertGreaterThan(plank.width, 300)
+        XCTAssertLessThanOrEqual(plank.maxY, TitleBannerGlyph.height)
+    }
+
+    func testBannerTitleOnlyWhileLive() {
+        let live = MediaSnapshot(identity: "browser", state: .playing, title: "  Song  ")
+        XCTAssertEqual(SceneRenderer.bannerTitle(live), "Song")
+        XCTAssertEqual(SceneRenderer.bannerTitle(MediaSnapshot(identity: "browser", state: .paused, title: "Song")), "Song")
+        XCTAssertNil(SceneRenderer.bannerTitle(MediaSnapshot(identity: "browser", state: .stopped, title: "Song")))
+        XCTAssertNil(SceneRenderer.bannerTitle(MediaSnapshot(identity: "browser", state: .playing, title: " ")))
+        XCTAssertNil(SceneRenderer.bannerTitle(.unknown))
+    }
+
     func testSignpostGlyphStates() {
         for available in [true, false] {
             XCTAssertTrue(isNonEmpty(SignpostGlyphs.image(.previous, available: available, scale: scale)))
@@ -81,46 +118,55 @@ final class SpriteRenderTests: XCTestCase {
     }
 
     func testHardHatClipsDifferFromTheBareClips() {
-        let bare = PetSprites.image(action: .idle, frame: 0, facing: .right, scale: scale)
-        let hat = PetSprites.image(action: .tinker, frame: 0, facing: .right, scale: scale)
-        XCTAssertNotEqual(bare.dataProvider?.data as Data?, hat.dataProvider?.data as Data?)
-        // The hat lands over four frames: the last suit-up frame is the tinker pose's hat height.
-        XCTAssertTrue(isNonEmpty(PetSprites.image(action: .suitUp, frame: 3, facing: .left, scale: scale)))
+        for species in PetSpecies.allCases {
+            let bare = PetSprites.image(species: species, action: .idle, frame: 0, facing: .right, scale: scale)
+            let hat = PetSprites.image(species: species, action: .tinker, frame: 0, facing: .right, scale: scale)
+            XCTAssertNotEqual(bare.dataProvider?.data as Data?, hat.dataProvider?.data as Data?, "\(species)")
+            // The hat lands over four frames: the last suit-up frame is the tinker pose's hat height.
+            XCTAssertTrue(isNonEmpty(PetSprites.image(species: species, action: .suitUp, frame: 3, facing: .left, scale: scale)))
+        }
     }
 
-    /// Count of opaque pixels whose colour is close to the pet's fur.
-    private func furPixels(_ image: CGImage) -> Int {
+    /// Count of opaque pixels that are not the poof's cream sparkles, i.e.
+    /// the body of any species.
+    private func bodyPixels(_ image: CGImage) -> Int {
         guard let data = image.dataProvider?.data as Data? else { return 0 }
         let bytes = [UInt8](data)
         var count = 0
         var i = 0
         while i + 3 < bytes.count {
-            // RGBA (premultipliedLast); fur is a strong orange.
+            // RGBA (premultipliedLast); cream is (0xFB, 0xE7, 0xC0) and the
+            // bitmap's colour management lands it within a few values.
             let r = Int(bytes[i]), g = Int(bytes[i + 1]), b = Int(bytes[i + 2]), a = Int(bytes[i + 3])
-            if a > 200, r > 200, g > 100, g < 200, b < 120 { count += 1 }
+            let isCream = abs(r - 0xFB) < 16 && abs(g - 0xE7) < 16 && abs(b - 0xC0) < 16
+            if a > 200, !isCream { count += 1 }
             i += 4
         }
         return count
     }
 
     func testTeleportPoofsOutCompletelyAndLandsOnTheIdlePose() {
-        XCTAssertGreaterThan(furPixels(PetSprites.image(action: .idle, frame: 0, facing: .right, scale: scale)), 0)
-        XCTAssertGreaterThan(furPixels(PetSprites.image(action: .teleportOut, frame: 0, facing: .right, scale: scale)), 0)
-        // Last poof-out frame: only sparkles remain.
-        let gone = PetSprites.image(action: .teleportOut, frame: 3, facing: .right, scale: scale)
-        XCTAssertEqual(furPixels(gone), 0, "the pet has vanished")
-        XCTAssertTrue(isNonEmpty(gone), "the sparkles are still drawn")
-        // The poof-in clip is the reverse: it starts empty and grows back.
-        XCTAssertEqual(furPixels(PetSprites.image(action: .teleportIn, frame: 0, facing: .right, scale: scale)), 0)
-        let out1 = furPixels(PetSprites.image(action: .teleportOut, frame: 1, facing: .right, scale: scale))
-        let out2 = furPixels(PetSprites.image(action: .teleportOut, frame: 2, facing: .right, scale: scale))
-        XCTAssertGreaterThan(out1, out2, "the body shrinks frame by frame")
-        XCTAssertEqual(PetSprites.image(action: .teleportIn, frame: 3, facing: .right, scale: scale).dataProvider?.data as Data?,
-                       PetSprites.image(action: .idle, frame: 0, facing: .right, scale: scale).dataProvider?.data as Data?,
-                       "lands on the normal idle pose")
+        for species in PetSpecies.allCases { assertTeleportInvariants(species) }
+    }
+
+    private func assertTeleportInvariants(_ species: PetSpecies) {
+        func furPixels(_ image: CGImage) -> Int { bodyPixels(image) }
+        func image(_ action: PetAction, _ frame: Int) -> CGImage {
+            PetSprites.image(species: species, action: action, frame: frame, facing: .right, scale: scale)
+        }
+        XCTAssertGreaterThan(furPixels(image(.idle, 0)), 0, "\(species)")
+        XCTAssertGreaterThan(furPixels(image(.teleportOut, 0)), 0, "\(species)")
+        let gone = image(.teleportOut, 3)
+        XCTAssertEqual(furPixels(gone), 0, "\(species) has vanished")
+        XCTAssertTrue(isNonEmpty(gone), "\(species): the sparkles are still drawn")
+        XCTAssertEqual(furPixels(image(.teleportIn, 0)), 0, "\(species)")
+        XCTAssertGreaterThan(furPixels(image(.teleportOut, 1)), furPixels(image(.teleportOut, 2)),
+                             "\(species): the body shrinks frame by frame")
+        XCTAssertEqual(image(.teleportIn, 3).dataProvider?.data as Data?, image(.idle, 0).dataProvider?.data as Data?,
+                       "\(species) lands on the normal idle pose")
         for frame in 0..<4 {
-            XCTAssertEqual(PetSprites.lift(action: .teleportOut, frame: frame), 0)
-            XCTAssertEqual(PetSprites.lift(action: .teleportIn, frame: frame), 0)
+            XCTAssertEqual(PetSprites.lift(species: species, action: .teleportOut, frame: frame), 0)
+            XCTAssertEqual(PetSprites.lift(species: species, action: .teleportIn, frame: frame), 0)
         }
     }
 

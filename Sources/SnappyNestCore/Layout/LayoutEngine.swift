@@ -45,6 +45,7 @@ public struct LayoutEngine: Equatable {
         public let volume: CGRect
         public let battery: CGRect      // rightmost control
         // Playback page.
+        public let titleBanner: CGRect  // hanging sign with the track title, left third
         public let trail: CGRect        // the pet walks this as the playhead
         public let elapsedLabel: CGRect
         public let durationLabel: CGRect
@@ -62,7 +63,9 @@ public struct LayoutEngine: Equatable {
     /// even if the strip is measured smaller than expected.
     public static let minimumControlWidth: CGFloat = 30
 
-    /// Playback page: time labels flank the trail; signposts sit at the right.
+    /// Playback page: the title sign takes the left third, then time labels
+    /// flank the trail and signposts sit at the right.
+    public static let titleBannerFraction: CGFloat = 1 / 3
     public static let timeLabelWidth: CGFloat = 40
     public static let signWidth: CGFloat = 34
     public static let signGap: CGFloat = 6
@@ -95,7 +98,7 @@ public struct LayoutEngine: Equatable {
             return Regions(
                 page: .world, full: bounds, sky: bounds, middle: bounds,
                 right: .null, brightness: .null, volume: .null, battery: .null,
-                trail: .null, elapsedLabel: .null, durationLabel: .null,
+                titleBanner: .null, trail: .null, elapsedLabel: .null, durationLabel: .null,
                 previous: .null, playPause: .null, next: .null
             )
         case .controls:
@@ -112,7 +115,7 @@ public struct LayoutEngine: Equatable {
             return Regions(
                 page: .controls, full: bounds, sky: bounds, middle: .null,
                 right: right, brightness: brightness, volume: volume, battery: battery,
-                trail: .null, elapsedLabel: .null, durationLabel: .null,
+                titleBanner: .null, trail: .null, elapsedLabel: .null, durationLabel: .null,
                 previous: .null, playPause: .null, next: .null
             )
         case .playback:
@@ -124,7 +127,9 @@ public struct LayoutEngine: Equatable {
             let playPause = CGRect(x: next.minX - gap - sign, y: y, width: sign, height: h)
             let previous = CGRect(x: playPause.minX - gap - sign, y: y, width: sign, height: h)
             let durationLabel = CGRect(x: previous.minX - gap - label, y: y, width: label, height: h)
-            let elapsedLabel = CGRect(x: x + inset, y: y, width: label, height: h)
+            let bannerW = max(LayoutEngine.minimumControlWidth, (w * LayoutEngine.titleBannerFraction).rounded() - inset)
+            let titleBanner = CGRect(x: x + inset, y: y, width: bannerW, height: h)
+            let elapsedLabel = CGRect(x: titleBanner.maxX + gap, y: y, width: label, height: h)
             let trailStart = elapsedLabel.maxX + gap
             let trail = CGRect(x: trailStart, y: y,
                                width: max(LayoutEngine.minimumControlWidth, durationLabel.minX - gap - trailStart),
@@ -132,7 +137,7 @@ public struct LayoutEngine: Equatable {
             return Regions(
                 page: .playback, full: bounds, sky: bounds, middle: .null,
                 right: .null, brightness: .null, volume: .null, battery: .null,
-                trail: trail, elapsedLabel: elapsedLabel, durationLabel: durationLabel,
+                titleBanner: titleBanner, trail: trail, elapsedLabel: elapsedLabel, durationLabel: durationLabel,
                 previous: previous, playPause: playPause, next: next
             )
         }

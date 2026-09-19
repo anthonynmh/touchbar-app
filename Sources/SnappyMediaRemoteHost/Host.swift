@@ -9,8 +9,13 @@
 // over pipes:
 //
 //   stdout, one JSON object per line whenever the now-playing info changes:
-//     {"title":"…","elapsed":83.2,"duration":212.0,"rate":1.0,"timestamp":…}
+//     {"title":"…","elapsed":83.2,"duration":212.0,"rate":1.0,"timestamp":…,
+//      "bundle":"org.mozilla.firefox"}
 //     {}                                   (no now-playing client)
+//   `bundle` is the now-playing client's bundle identifier (from
+//   `MRMediaRemoteGetNowPlayingApplicationPID`); it is omitted when the pid
+//   cannot be resolved. The app uses it to tell a Spotify snapshot mirrored
+//   by mediaremoted apart from a browser one.
 //   stdin, one command per line:
 //     toggle | next | previous | seek <seconds> | get | quit
 //
@@ -18,17 +23,20 @@
 // are only forwarded while a now-playing client is registered; otherwise
 // mediaremoted would launch the default media app.
 
+import AppKit
 import Darwin
 import Foundation
 
 private typealias GetNowPlaying = @convention(c) (DispatchQueue, @escaping @convention(block) (CFDictionary?) -> Void) -> Void
 private typealias SendCommand   = @convention(c) (Int32, CFDictionary?) -> Bool
 private typealias SetElapsed    = @convention(c) (Double) -> Void
+private typealias GetNowPlayingPID = @convention(c) (DispatchQueue, @escaping @convention(block) (Int32) -> Void) -> Void
 
 private final class Host {
     private let getFn: GetNowPlaying?
     private let sendFn: SendCommand?
     private let setElapsedFn: SetElapsed?
+    private let getPIDFn: GetNowPlayingPID?
     private var lastLine = ""
     private var hasClient = false
     private var stdinBuffer = Data()
@@ -44,6 +52,7 @@ private final class Host {
         getFn = symbol("MRMediaRemoteGetNowPlayingInfo", as: GetNowPlaying.self)
         sendFn = symbol("MRMediaRemoteSendCommand", as: SendCommand.self)
         setElapsedFn = symbol("MRMediaRemoteSetElapsedTime", as: SetElapsed.self)
+        getPIDFn = symbol("MRMediaRemoteGetNowPlayingApplicationPID", as: GetNowPlayingPID.self)
     }
 
     func run(once: Bool) {
@@ -88,14 +97,26 @@ private final class Host {
             guard let self else { return }
             let dict = info as? [String: Any] ?? [:]
             self.hasClient = !dict.isEmpty
-            self.emit(Self.line(from: dict))
-            completion?()
+            guard !dict.isEmpty, let getPIDFn = self.getPIDFn else {
+                self.emit(Self.line(from: dict, bundle: nil))
+                completion?()
+                return
+            }
+            // A passive read like the info itself: resolving the pid never
+            // sends a command, so it cannot launch anything.
+            getPIDFn(DispatchQueue.main) { [weak self] pid in
+                guard let self else { return }
+                let bundle = pid > 0 ? NSRunningApplication(processIdentifier: pid)?.bundleIdentifier : nil
+                self.emit(Self.line(from: dict, bundle: bundle))
+                completion?()
+            }
         }
     }
 
-    private static func line(from dict: [String: Any]) -> String {
+    private static func line(from dict: [String: Any], bundle: String?) -> String {
         guard !dict.isEmpty else { return "{}" }
         var out: [String: Any] = [:]
+        if let bundle { out["bundle"] = bundle }
         if let title = dict["kMRMediaRemoteNowPlayingInfoTitle"] as? String { out["title"] = title }
         if let elapsed = dict["kMRMediaRemoteNowPlayingInfoElapsedTime"] as? Double { out["elapsed"] = elapsed }
         if let duration = dict["kMRMediaRemoteNowPlayingInfoDuration"] as? Double { out["duration"] = duration }

@@ -88,6 +88,7 @@ public final class MediaRemoteSource: MediaSource {
             return MediaSnapshot(identity: identity, state: .unknown)
         }
         let title = dict["title"] as? String
+        let bundle = dict["bundle"] as? String
         let elapsed = dict["elapsed"] as? Double
         let duration = dict["duration"] as? Double
         let rate = dict["rate"] as? Double ?? 0
@@ -99,6 +100,7 @@ public final class MediaRemoteSource: MediaSource {
             elapsed: elapsed, duration: duration,
             elapsedAt: elapsedAt, rate: rate == 0 ? 1 : rate,
             title: title,
+            sourceApp: bundle,
             canPlayPause: true,
             canReadPosition: elapsed != nil,
             canReadDuration: (duration ?? 0) > 0.5,

@@ -54,6 +54,9 @@ public final class PetController {
     private enum Transition { case suitDown, teleportOut, teleportIn }
     private var transition: Transition?
     private var queuedMode: Mode?
+    /// A species change applied at the teleport's position jump, so the old
+    /// body poofs out and the new one poofs in.
+    private var pendingSpecies: PetSpecies?
     private var transitionUntil: Date?
 
     /// Freeze free-roam progression, useful during app-frontmost pauses.
@@ -124,6 +127,30 @@ public final class PetController {
             return
         }
         guard newMode != mode else { return }
+        beginTransition(to: newMode, now: now)
+    }
+
+    /// Change the pet's body. The current one poofs out (hat off first) and
+    /// the new one poofs in at its spot for the current page. A change during
+    /// a transition only replaces the pending species.
+    public func setSpecies(_ species: PetSpecies, now: Date) {
+        guard species != state.species else {
+            pendingSpecies = nil
+            return
+        }
+        pendingSpecies = species
+        if transition == nil {
+            beginTransition(to: mode, now: now)
+        }
+    }
+
+    /// Set the body without a poof — for the persisted choice at launch.
+    public func setSpeciesImmediately(_ species: PetSpecies) {
+        pendingSpecies = nil
+        state.species = species
+    }
+
+    private func beginTransition(to newMode: Mode, now: Date) {
         reactionUntil = nil
         isScrubbing = false
         targetX = nil
@@ -160,6 +187,10 @@ public final class PetController {
             }
             if queued == .workshop { state.facing = .right }
             state.position = CGPoint(x: x, y: groundY)
+            if let species = pendingSpecies {
+                state.species = species
+                pendingSpecies = nil
+            }
             begin(.teleportIn, action: .teleportIn, duration: Self.teleportDuration, now: now)
         case .teleportIn:
             transition = nil
