@@ -25,7 +25,7 @@ public enum PetSprites {
         case .cat:         return CatSprite.self
         case .mecha:       return MechaSprite.self
         case .cactus:      return CactusSprite.self
-        case .eldritchEye: return CatSprite.self
+        case .eldritchEye: return EldritchEyeSprite.self
         }
     }
 
