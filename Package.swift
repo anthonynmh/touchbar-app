@@ -14,12 +14,17 @@ let package = Package(
         .executable(name: "Probe04Volume",     targets: ["Probe04Volume"]),
         .executable(name: "Probe05Media",      targets: ["Probe05Media"]),
         .library(name: "SnappyNestCore", targets: ["SnappyNestCore"]),
+        .library(name: "SnappyMediaRemoteHost", type: .dynamic, targets: ["SnappyMediaRemoteHost"]),
         .library(name: "SnappyNestUI",   targets: ["SnappyNestUI"])
     ],
     targets: [
         .target(
             name: "SnappyNestCore",
             path: "Sources/SnappyNestCore"
+        ),
+        .target(
+            name: "SnappyMediaRemoteHost",
+            path: "Sources/SnappyMediaRemoteHost"
         ),
         .target(
             name: "SnappyNestUI",

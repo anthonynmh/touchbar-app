@@ -55,17 +55,21 @@ final class PetControllerProgressFollowTests: XCTestCase {
         _ = t
     }
 
-    func testEnteringPlaybackDashesToThePlayheadInsteadOfTeleporting() {
+    func testEnteringPlaybackHoldsStillDuringThePoofThenLandsOnThePlayhead() {
         let controller = PetController(seed: 1, layout: layout())
         let media = playing(elapsed: 100, duration: 120, at: now())
         controller.tick(now: now(), media: media)
         let startX = controller.state.position.x
         controller.enter(.playback, now: now())
-        XCTAssertEqual(controller.state.action, .dash)
+        XCTAssertEqual(controller.state.action, .teleportOut)
         controller.tick(now: now().addingTimeInterval(0.25), media: media)
-        let target = layout().trailX(fraction: 100.25 / 120.0, spriteHalfWidth: 12)
-        XCTAssertNotEqual(controller.state.position.x, startX)
-        XCTAssertGreaterThan(abs(controller.state.position.x - target), 1, "still on the way")
+        XCTAssertEqual(controller.state.position.x, startX, "the pet does not move while poofing out")
+
+        let landed = now().addingTimeInterval(PetController.teleportDuration)
+        controller.tick(now: landed, media: media)
+        XCTAssertEqual(controller.state.action, .teleportIn)
+        let target = layout().trailX(fraction: (100 + PetController.teleportDuration) / 120.0, spriteHalfWidth: 12)
+        XCTAssertEqual(controller.state.position.x, target, accuracy: 1e-6, "lands on the live playhead")
     }
 
     func testRestsOnTrailWhenNothingIsPlaying() {

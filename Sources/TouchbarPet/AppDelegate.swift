@@ -52,7 +52,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSLog("[SnappyNest] setup spotify")
         mediaSpotify = SpotifyMediaSource()
         NSLog("[SnappyNest] setup mediaremote")
-        mediaBrowser = MediaRemoteSource()
+        let hostLibrary = PerlMediaRemoteHost.locateLibrary()
+        NSLog("[SnappyNest] mediaremote host library=%@", hostLibrary?.path ?? "missing")
+        mediaBrowser = MediaRemoteSource(hostLibraryURL: hostLibrary)
         NSLog("[SnappyNest] providers ready")
 
         // Scene
@@ -400,5 +402,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         presenter?.uninstall()
+        (mediaBrowser as? MediaRemoteSource)?.shutdown()
     }
 }

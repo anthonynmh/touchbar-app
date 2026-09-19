@@ -93,14 +93,14 @@ Re-run any probe with `./Install/run-probe.sh 0N` after building. Probes 03 and
 - **05a · Spotify AppleScript adapter:** ✅ ok · `player state=paused`,
   `player position=150.22 s`, `duration=218.173 s`, `name of current track="Mother"`.
   First run of the bundled app will trigger the Automation permission prompt.
-- **05b · Browser MediaRemote adapter (Firefox / YouTube):** ✅ ok · `dlopen`
-  `/System/Library/PrivateFrameworks/MediaRemote.framework/MediaRemote` +
-  `dlsym MRMediaRemoteGetNowPlayingInfo` succeed; callback fires within the
-  3-second wait. During the probe run no browser tab was actively playing, so
-  the returned dictionary was empty — this correctly maps to `.unknown` in
-  the runtime adapter. To verify positive-case behavior, start a YouTube video
-  in Firefox with `media.hardwaremediakeys.enabled = true` (default) and
-  rerun.
+- **05b · Browser MediaRemote adapter, in-process:** ⛔ `none` even with a
+  YouTube video playing in Firefox. Since macOS 15.4 mediaremoted only answers
+  Apple-signed processes, so this path is kept as the negative control.
+- **05c · Browser MediaRemote adapter, perl-hosted (Firefox / YouTube):** ✅ ok ·
+  the same call made inside `/usr/bin/perl` (which loads
+  `libSnappyMediaRemoteHost.dylib` through `DynaLoader`) returned
+  `title`, `elapsed=5.05 s`, `duration=234.4 s`, `rate=1` for the playing
+  tab. This is the path the app uses.
 
 ## What's built
 
@@ -191,7 +191,8 @@ touchbar-pet/
     Probe02Presenter/          # DFRFoundation persistent-presenter probe
     Probe03Brightness/         # DisplayServices roundtrip
     Probe04Volume/             # Core Audio roundtrip
-    Probe05Media/              # Spotify + MediaRemote adapters
+    Probe05Media/              # Spotify + MediaRemote adapters (in-process and perl-hosted)
+    SnappyMediaRemoteHost/     # dylib loaded into /usr/bin/perl to reach MediaRemote
   Tests/
     SnappyNestCoreTests/       # 100 model/provider XCTest cases
     SnappyNestUITests/         # 30 renderer/presenter/snapshot XCTest cases
@@ -290,7 +291,7 @@ diagnostic points to the enlarged preview and Probe 02 if neither path attaches.
 | `DFRElementSetControlStripPresenceForIdentifier` | DFRFoundation | Control Strip anchor presence | Falls back to app-frontmost presenter automatically |
 | `addSystemTrayItem:`, `removeSystemTrayItem:`, `presentSystemModalTouchBar:placement:systemTrayItemIdentifier:`, `dismissSystemModalTouchBar:` | AppKit runtime selectors | Retained tray anchor and placement-1 maximum-width system-modal bar | Falls back if any selector is absent; attachment timeout is also treated as failure |
 | `DisplayServicesGetBrightness` / `DisplayServicesSetBrightness` | DisplayServices | Built-in display brightness on Apple Silicon | Brightness slot renders `.unavailable` (hatched sun) |
-| `MRMediaRemoteGetNowPlayingInfo`, `MRMediaRemoteSendCommand`, `MRMediaRemoteRegister…` | MediaRemote | Browser (Firefox/YouTube) playback tracking | Browser source reports `.unknown`; pet stays in free-roam |
+| `MRMediaRemoteGetNowPlayingInfo`, `MRMediaRemoteSendCommand`, `MRMediaRemoteSetElapsedTime` (called inside a `/usr/bin/perl` child via `libSnappyMediaRemoteHost.dylib`, because macOS 15.4+ answers only Apple-signed processes) | MediaRemote | Browser (Firefox/YouTube) playback tracking, play/pause, skip, seek | Browser source reports `.unknown`; pet stays in free-roam |
 
 ## Preferences
 
@@ -336,9 +337,13 @@ simulation panel for clock / battery / playback. All state will persist to
 - **Spotify slider does nothing.** Check System Settings → Privacy & Security →
   Automation and enable Snappy Nest → Spotify. If Spotify isn't installed, the adapter
   reports unavailable and the browser adapter is used instead.
-- **YouTube tracking not working.** Firefox must publish MediaSession info. Check
-  `about:config` → `media.hardwaremediakeys.enabled = true` (default on recent versions)
-  and confirm the tab has an active `<video>` element with the MediaSession API set.
+- **YouTube tracking not working.** The app reads Now Playing through a
+  `/usr/bin/perl` child that loads `Contents/Frameworks/libSnappyMediaRemoteHost.dylib`
+  (macOS 15.4+ refuses the call from third-party processes). Check the log for
+  `mediaremote host unavailable` / `mediaremote host exited`, confirm the dylib is in the
+  bundle and perl exists, then run `./Install/run-probe.sh 05` with the video playing:
+  05c must report `ok`. Firefox must also publish MediaSession info:
+  `about:config` → `media.hardwaremediakeys.enabled = true` (default).
 - **Brightness slider is greyed.** `DisplayServicesGetBrightness` returned no value.
   This is the honest `.unavailable` state — no fallback (per design; simulating F1/F2
   key events is out of scope).

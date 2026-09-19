@@ -1,16 +1,17 @@
 #!/bin/bash
-# wrap-as-app.sh <executable-path> <bundle-id> <output-dir> [bundle-name]
+# wrap-as-app.sh <executable-path> <bundle-id> <output-dir> [bundle-name] [library-path]
 #
 # Wraps a swift-build command-line executable in a minimal .app bundle so it
 # can be activated (Touch Bar / NSApp.activate need a real bundle to work
-# reliably on macOS 26).
+# reliably on macOS 26). An optional dynamic library (the MediaRemote host)
+# is copied into Contents/Frameworks.
 #
 # Prints the path to the produced .app on stdout.
 
 set -euo pipefail
 
-if [ $# -lt 3 ] || [ $# -gt 4 ]; then
-    echo "usage: $0 <executable-path> <bundle-id> <output-dir> [bundle-name]" >&2
+if [ $# -lt 3 ] || [ $# -gt 5 ]; then
+    echo "usage: $0 <executable-path> <bundle-id> <output-dir> [bundle-name] [library-path]" >&2
     exit 2
 fi
 
@@ -18,6 +19,7 @@ EXEC_PATH="$1"
 BUNDLE_ID="$2"
 OUT_DIR="$3"
 BUNDLE_NAME="${4:-$(basename "$EXEC_PATH")}"
+LIBRARY_PATH="${5:-}"
 
 if [[ ! "$BUNDLE_NAME" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] ||
    [ "$BUNDLE_NAME" = "." ] || [ "$BUNDLE_NAME" = ".." ]; then
@@ -41,6 +43,17 @@ esac
 if [ ! -x "$EXEC_PATH" ]; then
     echo "error: not executable: $EXEC_PATH" >&2
     exit 1
+fi
+
+if [ -n "$LIBRARY_PATH" ]; then
+    if [ -L "$LIBRARY_PATH" ] || [ ! -f "$LIBRARY_PATH" ]; then
+        echo "error: library must be a regular, non-symlink file: $LIBRARY_PATH" >&2
+        exit 1
+    fi
+    case "$(basename "$LIBRARY_PATH")" in
+        *.dylib) ;;
+        *) echo "error: library must be a .dylib: $LIBRARY_PATH" >&2; exit 1 ;;
+    esac
 fi
 
 if [ ! -d "$OUT_DIR" ] || [ -L "$OUT_DIR" ]; then
@@ -85,6 +98,7 @@ APP_PATH="$OUT_DIR/${BUNDLE_NAME}.app"
 CONTENTS="$APP_PATH/Contents"
 MACOS_DIR="$CONTENTS/MacOS"
 RESOURCES_DIR="$CONTENTS/Resources"
+FRAMEWORKS_DIR="$CONTENTS/Frameworks"
 
 if [ -e "$APP_PATH" ] || [ -L "$APP_PATH" ]; then
     echo "error: destination already exists: $APP_PATH" >&2
@@ -109,6 +123,11 @@ mkdir "$APP_PATH"
 mkdir "$CONTENTS" "$MACOS_DIR" "$RESOURCES_DIR"
 cp "$EXEC_PATH" "$MACOS_DIR/$BUNDLE_NAME"
 chmod +x "$MACOS_DIR/$BUNDLE_NAME"
+if [ -n "$LIBRARY_PATH" ]; then
+    mkdir "$FRAMEWORKS_DIR"
+    cp "$LIBRARY_PATH" "$FRAMEWORKS_DIR/$(basename "$LIBRARY_PATH")"
+    chmod 700 "$FRAMEWORKS_DIR/$(basename "$LIBRARY_PATH")"
+fi
 
 cat > "$CONTENTS/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>

@@ -24,6 +24,7 @@ override DIST    := dist
 
 build:
 	swift build --product TouchbarPet
+	swift build --product SnappyMediaRemoteHost
 
 test:
 	swift test
@@ -42,7 +43,8 @@ run: build
 	stage_dir=$$(mktemp -d "$$(pwd -P)/$(STAGE)/run.XXXXXX"); \
 	trap 'rm -rf "$$stage_dir"' EXIT HUP INT TERM; \
 	app_path=$$(./Install/wrap-as-app.sh \
-		".build/debug/TouchbarPet" "com.local.snappy-nest" "$$stage_dir" "TouchbarPet"); \
+		".build/debug/TouchbarPet" "com.local.snappy-nest" "$$stage_dir" "TouchbarPet" \
+		".build/debug/libSnappyMediaRemoteHost.dylib"); \
 	"$$app_path/Contents/MacOS/TouchbarPet"
 
 install:
@@ -75,7 +77,8 @@ dmg: build
 	stage_dir=$$(mktemp -d "$$(pwd -P)/$(STAGE)/dmg.XXXXXX"); \
 	trap 'rm -rf "$$stage_dir"' EXIT HUP INT TERM; \
 	app_path=$$(./Install/wrap-as-app.sh \
-		".build/debug/TouchbarPet" "com.local.snappy-nest" "$$stage_dir" "TouchbarPet"); \
+		".build/debug/TouchbarPet" "com.local.snappy-nest" "$$stage_dir" "TouchbarPet" \
+		".build/debug/libSnappyMediaRemoteHost.dylib"); \
 	codesign --deep --force --options runtime \
 		--sign "$${SIGNING_IDENTITY}" "$$app_path"; \
 	rm -f "$(DIST)/TouchbarPet-$(VERSION).dmg"; \

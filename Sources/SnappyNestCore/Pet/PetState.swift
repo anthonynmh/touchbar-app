@@ -24,6 +24,11 @@ public enum PetAction: String, CaseIterable, Equatable, Hashable {
     case tinker
     /// Leaving the controls page: the hat pops back off. Never scheduled.
     case suitDown
+    /// Page change: the pet poofs out of its old spot. Never scheduled.
+    case teleportOut
+    /// Page change: the pet poofs back in at its spot on the new page. Never
+    /// scheduled.
+    case teleportIn
 
     public var suggestedFPS: Int {
         switch self {
@@ -33,6 +38,7 @@ public enum PetAction: String, CaseIterable, Equatable, Hashable {
         case .jump, .celebrate, .wake:            return 10
         case .happy, .surprised:                  return 10
         case .suitUp, .suitDown:                  return 10
+        case .teleportOut, .teleportIn:           return 10
         case .tinker:                             return 4
         case .dash:                               return 12
         }
@@ -56,6 +62,7 @@ public enum PetAction: String, CaseIterable, Equatable, Hashable {
         case .celebrate, .splash, .wake:          return 2
         case .surprised:                          return 3
         case .suitUp, .tinker, .suitDown:         return 4
+        case .teleportOut, .teleportIn:           return 4
         }
     }
 
@@ -67,6 +74,11 @@ public enum PetAction: String, CaseIterable, Equatable, Hashable {
     /// True while the pet wears the hard hat (controls page).
     public var wearsHardHat: Bool {
         self == .suitUp || self == .tinker || self == .suitDown
+    }
+
+    /// True during the page-change poof clips.
+    public var isTeleporting: Bool {
+        self == .teleportOut || self == .teleportIn
     }
 }
 
