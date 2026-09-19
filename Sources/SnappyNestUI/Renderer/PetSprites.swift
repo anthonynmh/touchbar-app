@@ -23,7 +23,7 @@ public enum PetSprites {
     static func drawer(for species: PetSpecies) -> PetSpeciesDrawer.Type {
         switch species {
         case .cat:         return CatSprite.self
-        case .mecha:       return CatSprite.self
+        case .mecha:       return MechaSprite.self
         case .cactus:      return CatSprite.self
         case .eldritchEye: return CatSprite.self
         }
@@ -263,6 +263,34 @@ public enum PetSprites {
         }
         eye(leftX)
         eye(rightX)
+    }
+
+    /// Hard hat: a golden dome with a brim, 14 wide, centred on `midX` with
+    /// the brim's top row at `brimY`. The dome is clipped to the brim so a
+    /// lifted hat (drop-on / pop-off clips) never draws below it.
+    static func drawHardHat(_ ctx: CGContext, midX: CGFloat, brimY: CGFloat) {
+        let hatW: CGFloat = 14
+        let hx = midX - hatW / 2
+        ctx.saveGState()
+        ctx.clip(to: CGRect(x: 0, y: -20, width: cellSize.width, height: brimY + 20))
+        ctx.setFillColor(outline)
+        ctx.fillEllipse(in: CGRect(x: hx + 1, y: brimY - 7, width: hatW - 2, height: 14))
+        ctx.setFillColor(Palette.golden)
+        ctx.fillEllipse(in: CGRect(x: hx + 2, y: brimY - 6, width: hatW - 4, height: 12))
+        ctx.setFillColor(Palette.cream)
+        ctx.fill(CGRect(x: hx + 4, y: brimY - 4, width: 2, height: 2))
+        ctx.restoreGState()
+        ctx.setFillColor(outline)
+        ctx.fill(CGRect(x: hx - 1, y: brimY - 1, width: hatW + 2, height: 3))
+        ctx.setFillColor(Palette.golden)
+        ctx.fill(CGRect(x: hx, y: brimY, width: hatW, height: 1))
+    }
+
+    /// Speed lines trail behind a dashing pet, at the left (back) edge.
+    static func drawSpeedLines(_ ctx: CGContext, topY: CGFloat) {
+        ctx.setFillColor(Palette.cream.copy(alpha: 0.8) ?? Palette.cream)
+        ctx.fill(CGRect(x: 0, y: topY, width: 4, height: 1))
+        ctx.fill(CGRect(x: 1, y: topY + 4, width: 3, height: 1))
     }
 
     /// Teleport sparkles: four cream flecks flying outward from the body's

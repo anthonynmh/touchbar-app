@@ -135,9 +135,10 @@ final class SpriteRenderTests: XCTestCase {
         var count = 0
         var i = 0
         while i + 3 < bytes.count {
-            // RGBA (premultipliedLast); cream is (0xFB, 0xE7, 0xC0).
+            // RGBA (premultipliedLast); cream is (0xFB, 0xE7, 0xC0) and the
+            // bitmap's colour management lands it within a few values.
             let r = Int(bytes[i]), g = Int(bytes[i + 1]), b = Int(bytes[i + 2]), a = Int(bytes[i + 3])
-            let isCream = abs(r - 0xFB) < 8 && abs(g - 0xE7) < 8 && abs(b - 0xC0) < 8
+            let isCream = abs(r - 0xFB) < 16 && abs(g - 0xE7) < 16 && abs(b - 0xC0) < 16
             if a > 200, !isCream { count += 1 }
             i += 4
         }

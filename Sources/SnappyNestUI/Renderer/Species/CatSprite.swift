@@ -133,29 +133,11 @@ enum CatSprite: PetSpeciesDrawer {
         // Hard hat: a golden dome with a brim, sitting on the head between the
         // ears. `lift` raises it for the drop-on / pop-off clips.
         if let lift = p.hat {
-            let hatW: CGFloat = 14
-            let hx = body.midX - hatW / 2
-            let brimY = by - 1 - lift
-            ctx.saveGState()
-            ctx.clip(to: CGRect(x: 0, y: -20, width: W, height: brimY + 20))
-            ctx.setFillColor(outline)
-            ctx.fillEllipse(in: CGRect(x: hx + 1, y: brimY - 7, width: hatW - 2, height: 14))
-            ctx.setFillColor(Palette.golden)
-            ctx.fillEllipse(in: CGRect(x: hx + 2, y: brimY - 6, width: hatW - 4, height: 12))
-            ctx.setFillColor(Palette.cream)
-            ctx.fill(CGRect(x: hx + 4, y: brimY - 4, width: 2, height: 2))
-            ctx.restoreGState()
-            ctx.setFillColor(outline)
-            ctx.fill(CGRect(x: hx - 1, y: brimY - 1, width: hatW + 2, height: 3))
-            ctx.setFillColor(Palette.golden)
-            ctx.fill(CGRect(x: hx, y: brimY, width: hatW, height: 1))
+            PetSprites.drawHardHat(ctx, midX: body.midX, brimY: by - 1 - lift)
         }
 
-        // Speed lines trail behind a dashing pet.
         if p.speedLines {
-            ctx.setFillColor(Palette.cream.copy(alpha: 0.8) ?? Palette.cream)
-            ctx.fill(CGRect(x: 0, y: by + 4, width: 4, height: 1))
-            ctx.fill(CGRect(x: 1, y: by + 8, width: 3, height: 1))
+            PetSprites.drawSpeedLines(ctx, topY: by + 4)
         }
 
     }
