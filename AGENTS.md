@@ -87,6 +87,22 @@ same notes. Keep all content here; do not duplicate it in `CLAUDE.md`.
   tap the controller holds the pet at the target (`PetController.seekHold`)
   until the source's readback catches up. The time labels always come from
   the media snapshot, never from the pending seek.
+- The playback page's left third (`LayoutEngine.titleBannerFraction`) is a
+  hanging wooden sign (`TitleBannerGlyph`) carrying `MediaSnapshot.title`
+  in a `CATextLayer`; the trail is what remains (≈ 425 pt at 1004). Short
+  titles are centred, long ones start at the left and end in an ellipsis;
+  the string is swapped only when it changes. The sign shows a title only
+  while the snapshot is playing or paused.
+- The pet body is decoupled from its behaviour: `PetSpecies` is a value on
+  `PetState`, `PetSprites.pose(action:frame:)` is the one shared
+  action→pose mapping, and a `PetSpeciesDrawer` (one file per species under
+  `Renderer/Species/`) turns a pose into pixels. A drawer must be a pure
+  function of the pose so `teleportIn` frame 3 equals `idle` frame 0 for
+  every species (`SpriteRenderTests` checks all of them). Adding a pet is
+  one enum case plus one drawer file. `PetController.setSpecies` reuses the
+  teleport transition so the old body poofs out and the new one poofs in.
+- The sprite bitmap's colour management shifts `Palette.cream` by a few
+  values (0xFBE7C0 → 0xFCEBCB); pixel probes in tests must use a tolerance.
 
 ## Volume control findings
 
@@ -140,6 +156,18 @@ same notes. Keep all content here; do not duplicate it in `CLAUDE.md`.
   the same no-client gate before any command, and exits when stdin closes.
   The dylib ships in `Contents/Frameworks` (`wrap-as-app.sh` 5th argument);
   without it or perl the source stays `.unknown` and logs why.
+- `MediaRemoteSource` is not browser-specific: it mirrors whatever
+  mediaremoted currently calls the now-playing client, and Spotify becomes
+  that client the moment it launches, even paused. The perl host therefore
+  emits the client's bundle id (`MRMediaRemoteGetNowPlayingApplicationPID`,
+  a passive read) as `bundle`, every snapshot carries `sourceApp`, and
+  `MediaArbiter` decides the auto source: a MediaRemote snapshot tagged with
+  Spotify's bundle is a duplicate and ignored, the playing source wins, and
+  ties keep the previous choice instead of defaulting to Spotify. Probe 05
+  `--watch` (05d) streams the host so the bundle can be observed while
+  Spotify launches. Not yet measured on hardware whether mediaremoted keeps
+  reporting Firefox after Spotify registers; if it does not, the page can
+  only show Spotify because nothing else is readable.
 - Seek and skip use the same gates: Spotify `set player position` /
   `next track` / `previous track` only pass `shouldScript()`; MediaRemote
   `MRMediaRemoteSetElapsedTime` and commands 4/5 (next/previous) are only
@@ -208,3 +236,11 @@ same notes. Keep all content here; do not duplicate it in `CLAUDE.md`.
   macOS 15.4+ ignores unentitled callers (Probe 05b/05c pair recorded above).
   Also fixed `run-probe.sh` aborting under bash 3.2 `set -u` when no flags
   are given. 144 tests. Hardware verification pending.
+- 2026-09-19 — `feat/title-banner-and-pet-species`: fixed auto media
+  selection following Spotify after it launched while Firefox played
+  (`MediaArbiter`, bundle-tagged snapshots, Probe 05d). Added the track
+  title on a hanging sign over the left third of the playback page. Split
+  `PetSprites` into a shared pose model plus per-species drawers with the
+  cat extracted byte-identically, and added three species — Mecha, Cactus,
+  Eldritch Eye — chosen from a 🐾 → Pet submenu and persisted with the
+  media source choice. 162 tests. Hardware verification pending.
