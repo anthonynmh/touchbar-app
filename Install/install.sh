@@ -52,10 +52,16 @@ fi
 
 echo "==> building TouchbarPet (release)..."
 swift build -c release --product TouchbarPet
+swift build -c release --product SnappyMediaRemoteHost
 
 EXEC_PATH="$REPO/.build/release/TouchbarPet"
 if [ ! -x "$EXEC_PATH" ]; then
     echo "error: build did not produce $EXEC_PATH" >&2
+    exit 1
+fi
+HOST_DYLIB="$REPO/.build/release/libSnappyMediaRemoteHost.dylib"
+if [ ! -f "$HOST_DYLIB" ] || [ -L "$HOST_DYLIB" ]; then
+    echo "error: build did not produce $HOST_DYLIB" >&2
     exit 1
 fi
 
@@ -105,7 +111,8 @@ APP_PATH=$("$REPO/Install/wrap-as-app.sh" \
     "$EXEC_PATH" \
     "com.local.snappy-nest" \
     "$STAGE_DIR" \
-    "TouchbarPet")
+    "TouchbarPet" \
+    "$HOST_DYLIB")
 echo "==> staged complete bundle at $APP_PATH"
 xcrun swift "$REPO/Install/atomic-replace.swift" "$APP_PATH" "$DEST"
 

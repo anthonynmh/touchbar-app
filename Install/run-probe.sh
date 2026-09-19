@@ -11,7 +11,7 @@
 #   ./Install/run-probe.sh 04   # Volume read-only (Core Audio)
 #   ./Install/run-probe.sh 03 --write
 #   ./Install/run-probe.sh 04 --write [--allow-unmute]
-#   ./Install/run-probe.sh 05   # Spotify + MediaRemote
+#   ./Install/run-probe.sh 05   # Spotify + MediaRemote (in-process and perl-hosted)
 
 set -euo pipefail
 
@@ -81,6 +81,18 @@ EXEC_PATH="$REPO/.build/debug/$TARGET"
 if [ ! -x "$EXEC_PATH" ]; then
     echo "error: no executable produced at $EXEC_PATH" >&2
     exit 1
+fi
+
+# Probe 05c loads the MediaRemote host dylib into /usr/bin/perl.
+if [ "$NN" = "05" ]; then
+    echo "Building SnappyMediaRemoteHost..." >&2
+    swift build --product SnappyMediaRemoteHost >&2
+    HOST_DYLIB="$REPO/.build/debug/libSnappyMediaRemoteHost.dylib"
+    if [ ! -f "$HOST_DYLIB" ] || [ -L "$HOST_DYLIB" ]; then
+        echo "error: no host dylib produced at $HOST_DYLIB" >&2
+        exit 1
+    fi
+    export SNAPPY_MEDIAREMOTE_HOST="$HOST_DYLIB"
 fi
 
 if [ "$NEEDS_BUNDLE" = "1" ]; then
@@ -167,5 +179,5 @@ if [ "$NEEDS_BUNDLE" = "1" ]; then
     OPEN_PID=""
     cat "$LOG_FILE"
 else
-    "$EXEC_PATH" "${PROBE_ARGS[@]}"
+    "$EXEC_PATH" ${PROBE_ARGS[@]+"${PROBE_ARGS[@]}"}
 fi

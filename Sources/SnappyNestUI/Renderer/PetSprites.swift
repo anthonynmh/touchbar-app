@@ -75,6 +75,8 @@ public enum PetSprites {
         var hat: CGFloat? = nil         // hard hat; value = lift above the head
         var spanner = false
         var spannerTilt: CGFloat = 0
+        var bodyHidden = false          // teleport: only the poof is drawn
+        var poof = 0                    // teleport sparkle burst radius step (0 = none)
     }
 
     private enum Accent { case none, question, sparkle, star, zee, note, heart, droplets, exclaim }
@@ -166,6 +168,37 @@ public enum PetSprites {
             p.eyes = f == 2 ? .closed : .side
             p.mouth = f == 1 || f == 3 ? .smile : .small
             p.bodyDY = f == 1 || f == 3 ? -1 : 0
+        case .teleportOut:
+            p = teleportPose(step: f)
+        case .teleportIn:
+            p = teleportPose(step: 3 - f)
+        }
+        return p
+    }
+
+    /// The poof, as a squash from the full pet (step 0) to nothing but
+    /// sparkles (step 3). `.teleportOut` plays it forward, `.teleportIn`
+    /// backward so the pet lands on its normal idle pose.
+    private static func teleportPose(step: Int) -> Pose {
+        var p = Pose()
+        switch step {
+        case 0:
+            break                       // the plain idle pose
+        case 1:
+            p.eyes = .closed
+            p.bodyDX = 2; p.bodyDY = -4
+            p.earLift = -1
+            p.poof = 1
+        case 2:
+            p.eyes = .closed
+            p.mouth = .none
+            p.bodyDX = -4; p.bodyDY = -8
+            p.earLift = -1
+            p.tailUp = false
+            p.poof = 2
+        default:
+            p.bodyHidden = true
+            p.poof = 3
         }
         return p
     }
@@ -182,6 +215,12 @@ public enum PetSprites {
         let p = pose(action: action, frame: frame)
         let W = cellSize.width
         let ground = cellSize.height           // feet touch the bottom edge
+
+        if p.bodyHidden {
+            drawPoof(ctx, step: p.poof, centerX: W / 2, ground: ground)
+            return
+        }
+        defer { if p.poof > 0 { drawPoof(ctx, step: p.poof, centerX: W / 2, ground: ground) } }
 
         // Body: a rounded blob. Width/height flex with the pose.
         let bw = 18 + p.bodyDX
@@ -353,6 +392,25 @@ public enum PetSprites {
         }
         eye(leftX)
         eye(rightX)
+    }
+
+    /// Teleport sparkles: four cream flecks flying outward from the body's
+    /// centre, farther each step, with a faint ring on the last step.
+    private static func drawPoof(_ ctx: CGContext, step: Int, centerX cx: CGFloat, ground: CGFloat) {
+        guard step > 0 else { return }
+        let cy = ground - 8
+        let r = CGFloat(2 + step * 2)
+        ctx.setFillColor(Palette.cream)
+        for (dx, dy) in [(1, 1), (-1, 1), (1, -1), (-1, -1)] as [(CGFloat, CGFloat)] {
+            let x = cx + dx * r, y = cy + dy * (r * 0.6)
+            ctx.fill(CGRect(x: x - 0.5, y: y - 1.5, width: 1, height: 3))
+            ctx.fill(CGRect(x: x - 1.5, y: y - 0.5, width: 3, height: 1))
+        }
+        if step == 3 {
+            ctx.setStrokeColor(Palette.cream)
+            ctx.setLineWidth(1)
+            ctx.strokeEllipse(in: CGRect(x: cx - 5, y: cy - 3, width: 10, height: 6))
+        }
     }
 
     private static func drawAccent(_ ctx: CGContext, _ accent: Accent, aboveX x: CGFloat, topY: CGFloat, frame: Int) {

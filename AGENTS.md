@@ -75,6 +75,14 @@ same notes. Keep all content here; do not duplicate it in `CLAUDE.md`.
   is what lets the pet stay on screen while a page slides and then travel
   to its spot on the new page (`PetController.enter(_:now:)`); do not move
   it into a page container.
+- A page change is a teleport, not a walk: `PetController.enter` runs a
+  phase machine (`suitDown` if hatted → `teleportOut` at the old spot →
+  position jump → `teleportIn` → the page's arrival action). The pet is
+  frozen and ignores taps/scrubs for the whole transition
+  (`transitionUntil`); a second `enter` mid-transition only retargets the
+  queued page. The poof clips are pose-driven (`PetSprites.teleportPose`);
+  `teleportIn` frame 3 must stay pixel-identical to `idle` frame 0 so the
+  landing does not pop.
 - Playback seeking is displayed through the pet only: after a scrub or trail
   tap the controller holds the pet at the target (`PetController.seekHold`)
   until the source's readback catches up. The time labels always come from
@@ -119,6 +127,19 @@ same notes. Keep all content here; do not duplicate it in `CLAUDE.md`.
   app, as the F8 key does.
 - `MRMediaRemoteGetNowPlayingInfo`, Core Audio, and DisplayServices reads are
   passive and cannot launch other applications.
+- Since macOS 15.4 mediaremoted answers `MRMediaRemoteGetNowPlayingInfo` only
+  for Apple-signed processes; a third-party app (signed or not — Developer ID
+  does not carry the private entitlement) always receives an empty
+  dictionary. Measured 2026-09-19 with YouTube playing in Firefox: Probe 05b
+  (in-process) `none`, Probe 05c (same call inside `/usr/bin/perl`) `ok`
+  with title, elapsed, duration and rate. The MediaRemote calls therefore
+  live in `libSnappyMediaRemoteHost.dylib` (`Sources/SnappyMediaRemoteHost`),
+  which `MediaRemoteSource` loads into perl via `DynaLoader`
+  (`PerlMediaRemoteHost`). The child streams one JSON line per change on
+  stdout, takes `toggle|next|previous|seek <s>|get|quit` on stdin, applies
+  the same no-client gate before any command, and exits when stdin closes.
+  The dylib ships in `Contents/Frameworks` (`wrap-as-app.sh` 5th argument);
+  without it or perl the source stays `.unknown` and logs why.
 - Seek and skip use the same gates: Spotify `set player position` /
   `next track` / `previous track` only pass `shouldScript()`; MediaRemote
   `MRMediaRemoteSetElapsedTime` and commands 4/5 (next/previous) are only
@@ -180,3 +201,10 @@ same notes. Keep all content here; do not duplicate it in `CLAUDE.md`.
   hard-hat `suitUp`/`tinker`/`suitDown` clips, and seek/skip on both media
   sources behind the existing launch gates. Play/pause moved off the
   controls page. 130 tests. Hardware verification pending.
+- 2026-09-19 — `feat/teleport-and-mediaremote-host`: page changes teleport
+  the pet (poof out, poof in at the playhead / workshop / a seeded roam spot,
+  then the hat clip on the controls page). Fixed YouTube-in-Firefox tracking:
+  MediaRemote is now read and commanded from a perl-hosted dylib because
+  macOS 15.4+ ignores unentitled callers (Probe 05b/05c pair recorded above).
+  Also fixed `run-probe.sh` aborting under bash 3.2 `set -u` when no flags
+  are given. 144 tests. Hardware verification pending.

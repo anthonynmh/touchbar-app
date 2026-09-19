@@ -13,6 +13,15 @@
 //      Success:  MEDIAREMOTE ok bundle=<...> title=<...> elapsed=<sec> duration=<sec> rate=<...>
 //      Empty:    MEDIAREMOTE none no_now_playing_info
 //      Failure:  MEDIAREMOTE fail reason=<...>
+//
+// 05c  MediaRemote through an Apple-signed host. Since macOS 15.4 mediaremoted
+//      answers only Apple-signed processes, so 05b is expected to be empty
+//      while 05c (the same call made inside /usr/bin/perl, which loads
+//      libSnappyMediaRemoteHost.dylib via DynaLoader) reports the track.
+//      Needs SNAPPY_MEDIAREMOTE_HOST=<path to the dylib> (run-probe.sh sets it).
+//      Success:  MEDIAREMOTE_HOST ok <json line>
+//      Empty:    MEDIAREMOTE_HOST none no_now_playing_info
+//      Failure:  MEDIAREMOTE_HOST fail reason=<...>
 
 import AppKit
 import Darwin
@@ -153,6 +162,57 @@ func probeMediaRemote() {
 }
 
 // -----------------------------------------------------------------------------
+// 05c — MediaRemote hosted in perl
+
+func probeMediaRemoteHost() {
+    guard let dylib = ProcessInfo.processInfo.environment["SNAPPY_MEDIAREMOTE_HOST"], !dylib.isEmpty else {
+        print("MEDIAREMOTE_HOST fail reason=SNAPPY_MEDIAREMOTE_HOST_unset")
+        return
+    }
+    guard FileManager.default.isExecutableFile(atPath: "/usr/bin/perl") else {
+        print("MEDIAREMOTE_HOST fail reason=no_perl")
+        return
+    }
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/perl")
+    process.arguments = ["-e", MediaRemoteHostLauncher.perlScript, dylib]
+    var env = ProcessInfo.processInfo.environment
+    env["SNAPPY_MEDIAREMOTE_ONCE"] = "1"
+    process.environment = env
+    let out = Pipe()
+    process.standardOutput = out
+    process.standardInput = FileHandle.nullDevice
+    do { try process.run() } catch {
+        print("MEDIAREMOTE_HOST fail reason=spawn error=\(error)")
+        return
+    }
+    let data = out.fileHandleForReading.readDataToEndOfFile()
+    process.waitUntilExit()
+    let line = String(data: data, encoding: .utf8)?
+        .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    if process.terminationStatus != 0 {
+        print("MEDIAREMOTE_HOST fail reason=exit_\(process.terminationStatus) output=\(line)")
+    } else if line == "{}" || line.isEmpty {
+        print("MEDIAREMOTE_HOST none no_now_playing_info")
+    } else {
+        print("MEDIAREMOTE_HOST ok \(line)")
+    }
+}
+
+/// Same fixed perl program the app uses (`PerlMediaRemoteHost.perlScript`);
+/// duplicated so the probe stays dependency-free.
+enum MediaRemoteHostLauncher {
+    static let perlScript = """
+    use DynaLoader;
+    my $lib = DynaLoader::dl_load_file($ARGV[0], 1) or die DynaLoader::dl_error();
+    my $sym = DynaLoader::dl_find_symbol($lib, "snappy_mediaremote_host") or die "snappy_mediaremote_host not found";
+    DynaLoader::dl_install_xsub("main::run", $sym);
+    main::run();
+    """
+}
+
+// -----------------------------------------------------------------------------
 
 probeSpotify()
 probeMediaRemote()
+probeMediaRemoteHost()

@@ -75,6 +75,20 @@ mkdir -m 700 "$OUTPUT"
 "$WRAP" "$EXECUTABLE" com.local.test "$OUTPUT" TouchbarPet >/dev/null
 expect_failure "$WRAP" "$EXECUTABLE" com.local.test "$OUTPUT" TouchbarPet
 
+# The optional host library lands in Contents/Frameworks; symlinks and
+# non-dylib files are rejected.
+LIBRARY="$TEST_ROOT/libFake.dylib"
+: > "$LIBRARY"
+LIB_OUTPUT="$TEST_ROOT/lib-output"
+mkdir -m 700 "$LIB_OUTPUT"
+"$WRAP" "$EXECUTABLE" com.local.test "$LIB_OUTPUT" TouchbarPet "$LIBRARY" >/dev/null
+[ -f "$LIB_OUTPUT/TouchbarPet.app/Contents/Frameworks/libFake.dylib" ] || fail "wrap did not bundle the library"
+LIB_BAD_OUTPUT="$TEST_ROOT/lib-bad-output"
+mkdir -m 700 "$LIB_BAD_OUTPUT"
+ln -s "$LIBRARY" "$TEST_ROOT/libLink.dylib"
+expect_failure "$WRAP" "$EXECUTABLE" com.local.test "$LIB_BAD_OUTPUT" TouchbarPet "$TEST_ROOT/libLink.dylib"
+expect_failure "$WRAP" "$EXECUTABLE" com.local.test "$LIB_BAD_OUTPUT" TouchbarPet "$EXECUTABLE"
+
 SECOND_OUTPUT="$TEST_ROOT/second-output"
 mkdir -m 700 "$SECOND_OUTPUT"
 expect_failure "$WRAP" "$EXECUTABLE" com.local.test \

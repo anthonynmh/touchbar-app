@@ -6,14 +6,17 @@ import Foundation
 /// the playback page, where the pet is the playhead; **battery is not an
 /// input at all**.
 ///
-/// The pet travels with the camera between the three pages (`Mode`):
+/// The pet travels with the camera between the three pages (`Mode`). A page
+/// change is a teleport: the pet poofs out where it stands (`.teleportOut`),
+/// reappears at its spot on the new page (`.teleportIn`), then the page's
+/// behaviour takes over:
 /// - `.roam` (world): free-roam walks and dashes toward seeded destinations;
 ///   taps on the pet play a reaction, one tap on the ground walks there and
 ///   a quick second tap sprints.
-/// - `.playback`: the pet walks the trail as media progresses and can be
-///   scrubbed along it to seek.
-/// - `.workshop` (controls): the pet dashes beside the controls, puts on a
-///   hard hat and tinkers until it leaves.
+/// - `.playback`: the pet lands on the playhead, walks the trail as media
+///   progresses and can be scrubbed along it to seek.
+/// - `.workshop` (controls): the pet lands beside the controls, puts on a
+///   hard hat and tinkers until it leaves (hat off first, then the poof).
 public final class PetController {
     public enum Mode: Equatable { case roam, playback, workshop }
 
@@ -46,7 +49,10 @@ public final class PetController {
     /// hold starts when it arrives so a slow readback cannot pull it back.
     private var isDashingToSeek = false
 
-    // Mode transitions: the hat comes off before the pet leaves the workshop.
+    // Mode transitions: optional hat-off, poof out, poof in at the new spot.
+    // `transitionUntil` doubles as the "busy" flag the tap/scrub guards use.
+    private enum Transition { case suitDown, teleportOut, teleportIn }
+    private var transition: Transition?
     private var queuedMode: Mode?
     private var transitionUntil: Date?
 
@@ -68,6 +74,8 @@ public final class PetController {
     public static let inspectHold: TimeInterval = 3.0
     /// Length of the hat on/off clips (4 frames at 10 fps).
     public static let suitDuration: TimeInterval = 0.4
+    /// Length of each poof clip (4 frames at the 8 Hz sprite timer).
+    public static let teleportDuration: TimeInterval = 0.5
     /// After a scrub or trail tap the pet holds the seek position this long
     /// so the source's readback can catch up before it steers the pet again.
     public static let seekHold: TimeInterval = 1.5
@@ -107,27 +115,74 @@ public final class PetController {
 
     // MARK: - Modes
 
-    /// The camera settled on a page; the pet follows. Leaving the workshop
-    /// first plays `.suitDown`, then the new mode takes over.
+    /// The camera settled on a page; the pet follows by teleporting. Leaving
+    /// the workshop first plays `.suitDown`. Calling this again mid-transition
+    /// only retargets the destination page.
     public func enter(_ newMode: Mode, now: Date) {
-        guard newMode != mode || queuedMode != nil else { return }
-        reactionUntil = nil
-        isScrubbing = false
-        if state.action.wearsHardHat && state.action != .suitDown {
-            state.action = .suitDown
-            state.frameIndex = 0
-            targetX = nil
+        if transition != nil {
             queuedMode = newMode
-            transitionUntil = now.addingTimeInterval(Self.suitDuration)
             return
         }
-        queuedMode = nil
-        transitionUntil = nil
-        apply(newMode, now: now)
+        guard newMode != mode else { return }
+        reactionUntil = nil
+        isScrubbing = false
+        targetX = nil
+        queuedMode = newMode
+        if state.action.wearsHardHat {
+            begin(.suitDown, action: .suitDown, duration: Self.suitDuration, now: now)
+        } else {
+            begin(.teleportOut, action: .teleportOut, duration: Self.teleportDuration, now: now)
+        }
     }
 
-    private func apply(_ newMode: Mode, now: Date) {
-        mode = newMode
+    private func begin(_ phase: Transition, action: PetAction, duration: TimeInterval, now: Date) {
+        transition = phase
+        state.action = action
+        state.frameIndex = 0
+        transitionUntil = now.addingTimeInterval(duration)
+    }
+
+    /// The current transition clip finished: move to the next phase.
+    private func advanceTransition(now: Date) {
+        guard let phase = transition, let queued = queuedMode else {
+            transition = nil
+            queuedMode = nil
+            return
+        }
+        switch phase {
+        case .suitDown:
+            begin(.teleportOut, action: .teleportOut, duration: Self.teleportDuration, now: now)
+        case .teleportOut:
+            mode = queued
+            let x = destinationX(for: queued, now: now)
+            if abs(x - state.position.x) > 0.5 {
+                state.facing = x > state.position.x ? .right : .left
+            }
+            if queued == .workshop { state.facing = .right }
+            state.position = CGPoint(x: x, y: groundY)
+            begin(.teleportIn, action: .teleportIn, duration: Self.teleportDuration, now: now)
+        case .teleportIn:
+            transition = nil
+            queuedMode = nil
+            transitionUntil = nil
+            arrive(in: queued, now: now)
+        }
+    }
+
+    /// Where the pet materialises on the page it is entering.
+    private func destinationX(for newMode: Mode, now: Date) -> CGFloat {
+        switch newMode {
+        case .roam:
+            return layout.petGroundX(fraction: scheduler.nextTargetFraction(), spriteHalfWidth: spriteHalfWidth)
+        case .playback:
+            return layout.trailX(fraction: lastMedia.progressFraction(at: now) ?? 0, spriteHalfWidth: spriteHalfWidth)
+        case .workshop:
+            return workshopX
+        }
+    }
+
+    /// The poof-in finished: start the page's behaviour from the landing spot.
+    private func arrive(in newMode: Mode, now: Date) {
         seekHoldUntil = nil
         isDashingToSeek = false
         targetX = nil
@@ -138,20 +193,16 @@ public final class PetController {
             state.action = .idle
             nextActionAt = nil
         case .playback:
-            if let fraction = lastMedia.progressFraction(at: now) {
-                state.action = .dash
-                setTarget(layout.trailX(fraction: fraction, spriteHalfWidth: spriteHalfWidth),
-                          arrival: .progressFollow, hold: 0)
+            if lastMedia.progressFraction(at: now) != nil {
+                state.action = .progressFollow
+                nextActionAt = nil
             } else {
-                state.action = .walk
-                setTarget(layout.trailX(fraction: 0, spriteHalfWidth: spriteHalfWidth),
-                          arrival: .inspect, hold: Self.inspectHold)
+                state.action = .inspect
+                nextActionAt = now.addingTimeInterval(Self.inspectHold)
             }
-            nextActionAt = nil
         case .workshop:
-            state.action = .dash
-            setTarget(workshopX, arrival: .suitUp, hold: Self.suitDuration)
-            nextActionAt = nil
+            state.action = .suitUp
+            nextActionAt = now.addingTimeInterval(Self.suitDuration)
         }
     }
 
@@ -163,14 +214,12 @@ public final class PetController {
         let dt = lastTickAt.map { max(0, min(Self.maxTickInterval, now.timeIntervalSince($0))) } ?? 0
         lastTickAt = now
 
-        // Finishing a hat-off clip applies the mode that was waiting on it.
+        // A page transition (hat off / poof out / poof in) freezes the pet;
+        // each finished clip starts the next phase.
         if let until = transitionUntil {
             if now < until { return }
-            transitionUntil = nil
-            if let queued = queuedMode {
-                queuedMode = nil
-                apply(queued, now: now)
-            }
+            advanceTransition(now: now)
+            if transitionUntil != nil { return }
         }
 
         // A tap reaction freezes everything else until it expires.
