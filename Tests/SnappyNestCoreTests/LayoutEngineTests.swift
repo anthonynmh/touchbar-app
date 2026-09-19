@@ -24,6 +24,7 @@ final class LayoutEngineTests: XCTestCase {
         XCTAssertGreaterThan(r.battery.minX, r.volume.maxX)
         XCTAssertTrue(r.playPause.isNull, "play/pause lives on the playback page")
         XCTAssertTrue(r.trail.isNull)
+        XCTAssertTrue(r.titleBanner.isNull)
         XCTAssertEqual(r.battery.maxX, r.right.maxX, accuracy: 1e-6)
         XCTAssertEqual(r.right.midX, r.full.midX, accuracy: 1e-6)
         XCTAssertEqual(r.brightness.width, LayoutEngine.maximumSliderWidth, accuracy: 1e-6)
@@ -35,13 +36,15 @@ final class LayoutEngineTests: XCTestCase {
     func testPlaybackPageOrdersLabelsTrailAndSignposts() {
         let r = LayoutEngine(bounds: touchBarBounds, backingScale: 2.0, page: .playback).regions
         XCTAssertEqual(r.page, .playback)
-        let ordered = [r.elapsedLabel, r.trail, r.durationLabel, r.previous, r.playPause, r.next]
+        let ordered = [r.titleBanner, r.elapsedLabel, r.trail, r.durationLabel, r.previous, r.playPause, r.next]
         for (a, b) in zip(ordered, ordered.dropFirst()) {
             XCTAssertGreaterThanOrEqual(b.minX, a.maxX, "regions must not overlap")
         }
-        XCTAssertGreaterThanOrEqual(r.elapsedLabel.minX, r.full.minX)
+        XCTAssertEqual(r.titleBanner.minX, r.full.minX + LayoutEngine.playbackInset)
+        XCTAssertEqual(r.titleBanner.maxX, (r.full.width / 3).rounded(), accuracy: 1e-6,
+                       "the title sign spans the left third")
         XCTAssertLessThanOrEqual(r.next.maxX, r.full.maxX)
-        XCTAssertGreaterThan(r.trail.width, 400, "the trail is most of the strip")
+        XCTAssertGreaterThan(r.trail.width, 350, "the trail is most of what remains")
         XCTAssertTrue(r.middle.isNull)
         XCTAssertTrue(r.brightness.isNull)
         XCTAssertTrue(r.battery.isNull)

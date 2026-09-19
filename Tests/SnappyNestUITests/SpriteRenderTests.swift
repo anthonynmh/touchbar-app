@@ -69,6 +69,30 @@ final class SpriteRenderTests: XCTestCase {
                        === ControlGlyphs.volume(level: 0.8, muted: false, available: true, scale: scale))
     }
 
+    func testTitleBannerGlyphStates() {
+        let shown = TitleBannerGlyph.image(width: 326, available: true, scale: scale)
+        let empty = TitleBannerGlyph.image(width: 326, available: false, scale: scale)
+        XCTAssertTrue(isNonEmpty(shown))
+        XCTAssertTrue(isNonEmpty(empty))
+        XCTAssertEqual(shown.width, Int(326 * scale))
+        XCTAssertEqual(shown.height, Int(TitleBannerGlyph.height * scale))
+        XCTAssertNotEqual(shown.dataProvider?.data as Data?, empty.dataProvider?.data as Data?,
+                          "an empty sign is drawn darker")
+        XCTAssertTrue(shown === TitleBannerGlyph.image(width: 326, available: true, scale: scale), "cached")
+        let plank = TitleBannerGlyph.plankRect(width: 326)
+        XCTAssertGreaterThan(plank.width, 300)
+        XCTAssertLessThanOrEqual(plank.maxY, TitleBannerGlyph.height)
+    }
+
+    func testBannerTitleOnlyWhileLive() {
+        let live = MediaSnapshot(identity: "browser", state: .playing, title: "  Song  ")
+        XCTAssertEqual(SceneRenderer.bannerTitle(live), "Song")
+        XCTAssertEqual(SceneRenderer.bannerTitle(MediaSnapshot(identity: "browser", state: .paused, title: "Song")), "Song")
+        XCTAssertNil(SceneRenderer.bannerTitle(MediaSnapshot(identity: "browser", state: .stopped, title: "Song")))
+        XCTAssertNil(SceneRenderer.bannerTitle(MediaSnapshot(identity: "browser", state: .playing, title: " ")))
+        XCTAssertNil(SceneRenderer.bannerTitle(.unknown))
+    }
+
     func testSignpostGlyphStates() {
         for available in [true, false] {
             XCTAssertTrue(isNonEmpty(SignpostGlyphs.image(.previous, available: available, scale: scale)))
