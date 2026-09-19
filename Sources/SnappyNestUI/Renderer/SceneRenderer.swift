@@ -11,18 +11,29 @@ import SnappyNestCore
 /// `update(model:)` on the main thread each tick.
 public final class SceneRenderer: NSView {
 
-    // Layers, back to front. The sky is fixed; the world and the controls
-    // page each live in a full-width container that slides horizontally when
-    // the page changes.
+    // Layers, back to front. The sky is fixed; each page lives in a
+    // full-width container that slides horizontally when the page changes.
+    // The pet sits above every container so it stays on screen while the
+    // scenery moves underneath and then travels to its spot on the new page.
     private let skyLayer = CALayer()
     private let worldContainer = CALayer()
     private let terrainLayer = CALayer()
     private let celestialLayer = CALayer()
     private let sceneryContainer = CALayer()
-    private let progressTrailLayer = CAShapeLayer()
-    private let petLayer = CALayer()
     private let clockPillLayer = CALayer()
     private let clockTextLayer = CATextLayer()
+    private let petLayer = CALayer()
+
+    private let playbackContainer = CALayer()
+    private let playbackTerrainLayer = CALayer()
+    private let trailLayer = CAShapeLayer()
+    private let trailCentreLayer = CAShapeLayer()
+    private let trailFillLayer = CAShapeLayer()
+    private let previousSignLayer = CALayer()
+    private let playPauseSignLayer = CALayer()
+    private let nextSignLayer = CALayer()
+    private let elapsedTextLayer = CATextLayer()
+    private let durationTextLayer = CATextLayer()
 
     private let controlsContainer = CALayer()
     private let controlsTerrainLayer = CALayer()
@@ -36,15 +47,16 @@ public final class SceneRenderer: NSView {
     private let volumeTrackLayer = CAShapeLayer()
     private let volumeFillLayer = CAShapeLayer()
     private let volumeKnob = CALayer()
-    private let playPauseLayer = CALayer()
 
     private var backingScale: CGFloat = 2.0
     private var cachedSky: (key: SkyPainter.Key, image: CGImage)?
     private var cachedTerrain: (key: SkyPainter.Key, image: CGImage)?
     private var cachedControlsTerrain: (key: SkyPainter.Key, image: CGImage)?
+    private var cachedPlaybackTerrain: (key: SkyPainter.Key, image: CGImage)?
     private var currentModel: SceneModel?
-    /// Camera over the two pages: 0 shows the world, `full.width` shows the
-    /// controls. Dragging the scene moves it; releasing snaps to a page.
+    /// Camera over the pages: `page.index × full.width` shows that page
+    /// (`-width` playback, 0 world, `+width` controls). Dragging the scene
+    /// moves it; releasing snaps to a page.
     private var cameraOffset: CGFloat = 0
     private var settledPage: LayoutEngine.Page = .world
     private var isDraggingCamera = false
@@ -71,6 +83,15 @@ public final class SceneRenderer: NSView {
     public var onTogglePlayPause:  (() -> Void)?
     public var onPetTap:           (() -> Void)?
     public var onGroundTap:        ((CGFloat) -> Void)?
+    /// Playback page: a tap on the trail asks for a seek to this fraction.
+    public var onSeek:             ((Double) -> Void)?
+    public var onNextTrack:        (() -> Void)?
+    public var onPreviousTrack:    (() -> Void)?
+    /// Playback page: the finger landed on the pet and is dragging it along
+    /// the trail (`x` in strip coordinates); the owner seeks on end.
+    public var onScrubBegin:       (() -> Void)?
+    public var onScrubMove:        ((CGFloat) -> Void)?
+    public var onScrubEnd:         (() -> Void)?
     /// The scene was dragged and settled on a page; the owner should compose
     /// with that `LayoutEngine.Page` from now on.
     public var onPageChange:       ((LayoutEngine.Page) -> Void)?
@@ -90,18 +111,21 @@ public final class SceneRenderer: NSView {
         super.viewDidChangeBackingProperties()
         backingScale = window?.backingScaleFactor ?? 2.0
         applyContentsScale(to: layer)
-        cachedSky = nil
-        cachedTerrain = nil
-        cachedControlsTerrain = nil
+        invalidateCaches()
         if let m = currentModel { update(model: m) }
     }
 
     public override func layout() {
         super.layout()
+        invalidateCaches()
+        if let m = currentModel { update(model: m) }
+    }
+
+    private func invalidateCaches() {
         cachedSky = nil
         cachedTerrain = nil
         cachedControlsTerrain = nil
-        if let m = currentModel { update(model: m) }
+        cachedPlaybackTerrain = nil
     }
 
     private func applyContentsScale(to layer: CALayer?) {
@@ -117,35 +141,50 @@ public final class SceneRenderer: NSView {
         layer?.contentsScale = backingScale
 
         let worldLayers: [CALayer] = [
-            terrainLayer, celestialLayer, sceneryContainer, progressTrailLayer, petLayer,
-            clockPillLayer
+            terrainLayer, celestialLayer, sceneryContainer, clockPillLayer
+        ]
+        let playbackLayers: [CALayer] = [
+            playbackTerrainLayer, trailLayer, trailCentreLayer, trailFillLayer,
+            previousSignLayer, playPauseSignLayer, nextSignLayer,
+            elapsedTextLayer, durationTextLayer
         ]
         let controlLayers: [CALayer] = [
             controlsTerrainLayer,
             brightnessIconLayer, brightnessTrackLayer, brightnessFillLayer, brightnessKnob,
             volumeIconLayer, volumeTrackLayer, volumeFillLayer, volumeKnob,
-            playPauseLayer, batteryGlyphLayer, batteryTextLayer
+            batteryGlyphLayer, batteryTextLayer
         ]
-        for l in [skyLayer, worldContainer, controlsContainer] + worldLayers + controlLayers {
+        let containers = [playbackContainer, worldContainer, controlsContainer]
+        for l in [skyLayer, petLayer] + containers + worldLayers + playbackLayers + controlLayers {
             l.contentsScale = backingScale
             l.magnificationFilter = .nearest
             l.minificationFilter = .nearest
             l.isOpaque = false
         }
         layer?.addSublayer(skyLayer)
-        layer?.addSublayer(worldContainer)
-        layer?.addSublayer(controlsContainer)
+        containers.forEach { layer?.addSublayer($0) }
+        layer?.addSublayer(petLayer)
         worldLayers.forEach { worldContainer.addSublayer($0) }
+        playbackLayers.forEach { playbackContainer.addSublayer($0) }
         controlLayers.forEach { controlsContainer.addSublayer($0) }
-        for c in [worldContainer, controlsContainer] { c.anchorPoint = .zero }
+        containers.forEach { $0.anchorPoint = .zero }
 
         clockPillLayer.addSublayer(clockTextLayer)
         clockPillLayer.isHidden = true
 
-        progressTrailLayer.strokeColor = Palette.cyan.copy(alpha: 0.55)
-        progressTrailLayer.lineWidth = 1.0
-        progressTrailLayer.fillColor = nil
-        progressTrailLayer.lineCap = .round
+        // The trail: a dirt path with a worn centre line; progress fills it.
+        trailLayer.strokeColor = Palette.brown.copy(alpha: 0.7)
+        trailLayer.lineWidth = 4
+        trailLayer.lineCap = .round
+        trailLayer.fillColor = nil
+        trailCentreLayer.strokeColor = Palette.terrain.copy(alpha: 0.9)
+        trailCentreLayer.lineWidth = 1
+        trailCentreLayer.lineDashPattern = [3, 3]
+        trailCentreLayer.fillColor = nil
+        trailFillLayer.strokeColor = Palette.cyan.copy(alpha: 0.8)
+        trailFillLayer.lineWidth = 2
+        trailFillLayer.lineCap = .round
+        trailFillLayer.fillColor = nil
 
         for track in [brightnessTrackLayer, volumeTrackLayer] {
             track.strokeColor = Palette.brown.copy(alpha: 0.55)
@@ -164,14 +203,16 @@ public final class SceneRenderer: NSView {
             knob.borderColor = Palette.brown
         }
 
-        for text in [batteryTextLayer, clockTextLayer] {
+        for text in [batteryTextLayer, clockTextLayer, elapsedTextLayer, durationTextLayer] {
             text.alignmentMode = .center
             text.truncationMode = .none
             text.foregroundColor = Palette.cream
             text.contentsScale = backingScale
         }
-        batteryTextLayer.font = NSFont.monospacedDigitSystemFont(ofSize: 9, weight: .semibold)
-        batteryTextLayer.fontSize = 9
+        for text in [batteryTextLayer, elapsedTextLayer, durationTextLayer] {
+            text.font = NSFont.monospacedDigitSystemFont(ofSize: 9, weight: .semibold)
+            text.fontSize = 9
+        }
         clockTextLayer.font = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .semibold)
         clockTextLayer.fontSize = 10
         clockPillLayer.backgroundColor = CGColor(red: 0x18/255, green: 0x14/255, blue: 0x0F/255, alpha: 0.82)
@@ -204,6 +245,7 @@ public final class SceneRenderer: NSView {
         let full = model.layout.full
         let world = LayoutEngine(bounds: full, backingScale: backingScale, page: .world).regions
         let controls = LayoutEngine(bounds: full, backingScale: backingScale, page: .controls).regions
+        let playback = LayoutEngine(bounds: full, backingScale: backingScale, page: .playback).regions
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)
@@ -211,39 +253,47 @@ public final class SceneRenderer: NSView {
         paintTerrain(regions: world, time: model.time)
         paintCelestial(pos: model.celestial)
         paintScenery(model.props, regions: world)
-        paintProgressTrail(regions: world, fraction: model.progressFraction)
-        paintPet(state: model.pet, regions: world)
         paintClock(model: model, regions: world)
+        paintPlaybackTerrain(regions: playback, time: model.time)
+        paintTrail(model: model, regions: playback)
+        paintSignposts(media: model.media, regions: playback)
+        paintTimeLabels(model: model, regions: playback)
         paintControlsTerrain(regions: controls, time: model.time)
         paintBattery(model.battery, regions: controls)
         paintBrightness(value: model.brightness, available: model.brightnessAvailable, regions: controls)
         paintVolume(value: model.volume, muted: model.volumeMuted, available: model.volumeAvailable, regions: controls)
-        paintPlayPause(media: model.media, regions: controls)
+        paintPet(state: model.pet)
         syncCamera(to: model.layout.page, full: full)
         CATransaction.commit()
     }
 
     // MARK: - Camera / pages
 
-    /// True once the camera has settled on the controls page.
-    var isShowingControls: Bool { settledPage == .controls }
+    /// The page the camera has settled on (or is sliding toward).
+    var currentPage: LayoutEngine.Page { settledPage }
+
+    private var containers: [CALayer] { [playbackContainer, worldContainer, controlsContainer] }
+
+    private func offset(for page: LayoutEngine.Page, width: CGFloat) -> CGFloat {
+        CGFloat(page.index) * width
+    }
 
     /// Called from `update(model:)`: follow the owner's page unless the user
     /// is mid-drag, so an idle timeout or an external change pans the scene.
     private func syncCamera(to page: LayoutEngine.Page, full: CGRect) {
-        worldContainer.bounds = full
-        controlsContainer.bounds = full
+        containers.forEach { $0.bounds = full }
         if isDraggingCamera { return }
         if page != settledPage {
             settledPage = page
-            animateCamera(to: page == .world ? 0 : full.width, width: full.width)
+            animateCamera(to: offset(for: page, width: full.width), width: full.width)
         } else if worldContainer.animation(forKey: "pageSlide") == nil {
-            cameraOffset = page == .world ? 0 : full.width
+            cameraOffset = offset(for: page, width: full.width)
             positionContainers(offset: cameraOffset, width: full.width)
         }
     }
 
     private func positionContainers(offset: CGFloat, width: CGFloat) {
+        playbackContainer.position = CGPoint(x: -width - offset, y: 0)
         worldContainer.position = CGPoint(x: -offset, y: 0)
         controlsContainer.position = CGPoint(x: width - offset, y: 0)
     }
@@ -254,9 +304,10 @@ public final class SceneRenderer: NSView {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         positionContainers(offset: target, width: width)
-        for (container, fromX) in [(worldContainer, -from), (controlsContainer, width - from)] {
+        let delta = target - from
+        for container in containers {
             let slide = CABasicAnimation(keyPath: "position")
-            slide.fromValue = NSValue(point: CGPoint(x: fromX, y: 0))
+            slide.fromValue = NSValue(point: CGPoint(x: container.position.x + delta, y: 0))
             slide.toValue = NSValue(point: container.position)
             slide.duration = Self.pageSlideDuration
             slide.timingFunction = CAMediaTimingFunction(name: .easeOut)
@@ -266,18 +317,17 @@ public final class SceneRenderer: NSView {
     }
 
     /// Drive the camera from a horizontal drag. `translation` is the finger's
-    /// movement since the drag began; a positive value pulls the world back
-    /// into view.
+    /// movement since the drag began; a positive value pulls the scene to the
+    /// right (toward the playback page).
     func beginCameraDrag() {
         isDraggingCamera = true
         dragStartOffset = cameraOffset
-        worldContainer.removeAnimation(forKey: "pageSlide")
-        controlsContainer.removeAnimation(forKey: "pageSlide")
+        containers.forEach { $0.removeAnimation(forKey: "pageSlide") }
     }
 
     func moveCameraDrag(translationX: CGFloat) {
         guard isDraggingCamera, let width = currentModel?.layout.full.width else { return }
-        cameraOffset = min(width, max(0, dragStartOffset - translationX))
+        cameraOffset = min(width, max(-width, dragStartOffset - translationX))
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         positionContainers(offset: cameraOffset, width: width)
@@ -287,17 +337,18 @@ public final class SceneRenderer: NSView {
     func endCameraDrag(velocityX: CGFloat) {
         guard isDraggingCamera, let width = currentModel?.layout.full.width else { return }
         isDraggingCamera = false
-        let page: LayoutEngine.Page
+        let index: Int
         if velocityX < -Self.flickVelocity {
-            page = .controls
+            index = settledPage.index + 1
         } else if velocityX > Self.flickVelocity {
-            page = .world
+            index = settledPage.index - 1
         } else {
-            page = cameraOffset < width / 2 ? .world : .controls
+            index = Int((cameraOffset / width).rounded())
         }
+        let page = LayoutEngine.Page(index: min(1, max(-1, index))) ?? .world
         let changed = page != settledPage
         settledPage = page
-        animateCamera(to: page == .world ? 0 : width, width: width)
+        animateCamera(to: offset(for: page, width: width), width: width)
         if changed { onPageChange?(page) }
     }
 
@@ -321,6 +372,17 @@ public final class SceneRenderer: NSView {
             cachedTerrain = (key, SkyPainter.terrain(size: regions.middle.size, time: time, scale: backingScale))
         }
         terrainLayer.contents = cachedTerrain?.image
+    }
+
+    private func paintPlaybackTerrain(regions: LayoutEngine.Regions, time: WorldTime) {
+        playbackTerrainLayer.frame = regions.full
+        playbackTerrainLayer.magnificationFilter = .linear
+        let key = SkyPainter.Key(time: time, size: regions.full.size, scale: backingScale)
+        if cachedPlaybackTerrain?.key != key {
+            cachedPlaybackTerrain = (key, SkyPainter.terrain(size: regions.full.size, time: time,
+                                                             scale: backingScale, xOffset: -regions.full.width))
+        }
+        playbackTerrainLayer.contents = cachedPlaybackTerrain?.image
     }
 
     private func paintControlsTerrain(regions: LayoutEngine.Regions, time: WorldTime) {
@@ -377,28 +439,80 @@ public final class SceneRenderer: NSView {
         }
     }
 
-    // MARK: - Progress trail
+    // MARK: - Playback page
 
-    private func paintProgressTrail(regions: LayoutEngine.Regions, fraction: Double?) {
-        guard let f = fraction else {
-            progressTrailLayer.path = nil
-            return
-        }
-        let m = regions.middle
-        let inset: CGFloat = 8
-        let y = m.maxY - 3
-        let x0 = m.minX + inset
-        let x1 = m.minX + inset + CGFloat(f) * (m.width - 2 * inset)
+    private static let timeFont = NSFont.monospacedDigitSystemFont(ofSize: 9, weight: .semibold)
+
+    private var petHalfWidth: CGFloat { PetSprites.cellSize.width / 2 }
+
+    /// The trail runs along the ground of the playback page; the cyan fill
+    /// shows progress up to the playhead.
+    private func paintTrail(model: SceneModel, regions: LayoutEngine.Regions) {
+        let t = regions.trail
+        let y = t.maxY - 3
+        let engine = LayoutEngine(bounds: regions.full, backingScale: backingScale, page: .playback)
+        let x0 = engine.trailX(fraction: 0, spriteHalfWidth: petHalfWidth)
+        let x1 = engine.trailX(fraction: 1, spriteHalfWidth: petHalfWidth)
         let path = CGMutablePath()
         path.move(to: CGPoint(x: x0, y: y))
         path.addLine(to: CGPoint(x: x1, y: y))
-        progressTrailLayer.frame = regions.full
-        progressTrailLayer.path = path
+        for layer in [trailLayer, trailCentreLayer, trailFillLayer] { layer.frame = regions.full }
+        trailLayer.path = path
+        trailCentreLayer.path = path
+
+        if let f = model.progressFraction {
+            let fill = CGMutablePath()
+            fill.move(to: CGPoint(x: x0, y: y))
+            fill.addLine(to: CGPoint(x: engine.trailX(fraction: f, spriteHalfWidth: petHalfWidth), y: y))
+            trailFillLayer.path = fill
+            trailFillLayer.isHidden = false
+        } else {
+            trailFillLayer.path = nil
+            trailFillLayer.isHidden = true
+        }
+    }
+
+    private func paintSignposts(media: MediaSnapshot, regions: LayoutEngine.Regions) {
+        let size = SignpostGlyphs.size
+        func place(_ layer: CALayer, in region: CGRect, image: CGImage) {
+            layer.contents = image
+            layer.frame = CGRect(x: (region.midX - size.width / 2).rounded(),
+                                 y: region.maxY - size.height - 1,
+                                 width: size.width, height: size.height)
+        }
+        place(previousSignLayer, in: regions.previous,
+              image: SignpostGlyphs.image(.previous, available: media.canSkip, scale: backingScale))
+        place(playPauseSignLayer, in: regions.playPause,
+              image: SignpostGlyphs.image(.playPause, isPlaying: media.state == .playing,
+                                          available: media.canPlayPause, scale: backingScale))
+        place(nextSignLayer, in: regions.next,
+              image: SignpostGlyphs.image(.next, available: media.canSkip, scale: backingScale))
+    }
+
+    private func paintTimeLabels(model: SceneModel, regions: LayoutEngine.Regions) {
+        let duration = model.media.canFollowProgress ? model.media.duration : nil
+        let elapsed = model.progressFraction.flatMap { f in duration.map { f * $0 } }
+        elapsedTextLayer.string = Self.timeString(elapsed)
+        durationTextLayer.string = Self.timeString(duration)
+        let tint = duration == nil ? Palette.unavailableTint : Palette.cream
+        elapsedTextLayer.foregroundColor = tint
+        durationTextLayer.foregroundColor = tint
+        for (layer, region) in [(elapsedTextLayer, regions.elapsedLabel), (durationTextLayer, regions.durationLabel)] {
+            layer.frame = CGRect(x: region.minX, y: (region.midY - 6).rounded(), width: region.width, height: 12)
+        }
+    }
+
+    /// `m:ss`, or an em-dash placeholder when unknown.
+    static func timeString(_ seconds: TimeInterval?) -> String {
+        guard let s = seconds, s.isFinite, s >= 0 else { return "–:––" }
+        let total = Int(s.rounded(.down))
+        return String(format: "%d:%02d", total / 60, total % 60)
     }
 
     // MARK: - Pet
 
-    private func paintPet(state: PetState, regions: LayoutEngine.Regions) {
+    /// The pet is positioned in strip coordinates above every page container.
+    private func paintPet(state: PetState) {
         let size = PetSprites.cellSize
         petLayer.contents = PetSprites.image(
             action: state.action,
@@ -530,20 +644,6 @@ public final class SceneRenderer: NSView {
         }
     }
 
-    private func paintPlayPause(media: MediaSnapshot, regions: LayoutEngine.Regions) {
-        let r = regions.playPause
-        if !media.canPlayPause {
-            playPauseLayer.isHidden = true
-            return
-        }
-        playPauseLayer.isHidden = false
-        playPauseLayer.magnificationFilter = .linear
-        let size = ControlGlyphs.playPauseSize
-        playPauseLayer.frame = CGRect(x: (r.midX - size.width / 2).rounded(), y: (r.midY - size.height / 2).rounded(),
-                                      width: size.width, height: size.height)
-        playPauseLayer.contents = ControlGlyphs.playPause(isPlaying: media.state == .playing, scale: backingScale)
-    }
-
     // MARK: - Input
 
     @objc private func handleClick(_ recognizer: NSClickGestureRecognizer) {
@@ -551,19 +651,34 @@ public final class SceneRenderer: NSView {
         handleTap(at: recognizer.location(in: self))
     }
 
-    private var panIsSlider = false
+    private enum PanKind { case camera, slider, scrub }
+    private var panKind: PanKind = .camera
 
     @objc private func handlePan(_ recognizer: NSPanGestureRecognizer) {
         let point = recognizer.location(in: self)
         switch recognizer.state {
         case .began:
-            panIsSlider = isSliderPoint(point)
-            if panIsSlider { handleDrag(at: point) } else { beginCameraDrag() }
+            // Decided once: a drag never changes from slider/scrub to pan mid-gesture.
+            if isSliderPoint(point) { panKind = .slider }
+            else if isScrubPoint(point) { panKind = .scrub }
+            else { panKind = .camera }
+            switch panKind {
+            case .slider: handleDrag(at: point)
+            case .scrub: onScrubBegin?(); onScrubMove?(point.x)
+            case .camera: beginCameraDrag()
+            }
         case .changed:
-            if panIsSlider { handleDrag(at: point) }
-            else { moveCameraDrag(translationX: recognizer.translation(in: self).x) }
+            switch panKind {
+            case .slider: handleDrag(at: point)
+            case .scrub: onScrubMove?(point.x)
+            case .camera: moveCameraDrag(translationX: recognizer.translation(in: self).x)
+            }
         case .ended, .cancelled, .failed:
-            if !panIsSlider { endCameraDrag(velocityX: recognizer.velocity(in: self).x) }
+            switch panKind {
+            case .slider: break
+            case .scrub: onScrubEnd?()
+            case .camera: endCameraDrag(velocityX: recognizer.velocity(in: self).x)
+            }
         default:
             break
         }
@@ -576,14 +691,23 @@ public final class SceneRenderer: NSView {
             || (model.layout.volume.contains(point) && model.volumeAvailable)
     }
 
+    /// On the playback page a drag that starts on the pet carries it along
+    /// the trail (a seek) instead of panning.
+    func isScrubPoint(_ point: CGPoint) -> Bool {
+        guard let model = currentModel, model.layout.page == .playback else { return false }
+        return petHitRect(model.pet).contains(point)
+    }
+
+    private func petHitRect(_ pet: PetState) -> CGRect {
+        pet.hitRect(spriteSize: PetSprites.cellSize).insetBy(dx: -Self.tapSlop, dy: -Self.tapSlop)
+    }
+
     func handleTap(at point: CGPoint) {
         guard let model = currentModel else { return }
         let regions = model.layout
         switch regions.page {
         case .controls:
-            if regions.playPause.contains(point) && model.media.canPlayPause {
-                onTogglePlayPause?()
-            } else if regions.brightness.contains(point) && model.brightnessAvailable {
+            if regions.brightness.contains(point) && model.brightnessAvailable {
                 onBrightnessChange?(fraction(x: point.x, in: trackRect(regions.brightness)))
             } else if regions.volume.contains(point) && model.volumeAvailable {
                 onVolumeChange?(fraction(x: point.x, in: trackRect(regions.volume)))
@@ -591,10 +715,23 @@ public final class SceneRenderer: NSView {
         case .world:
             if celestialRect(model.celestial).insetBy(dx: -Self.tapSlop, dy: -Self.tapSlop).contains(point) {
                 revealClock()
-            } else if model.pet.hitRect(spriteSize: PetSprites.cellSize).insetBy(dx: -Self.tapSlop, dy: -Self.tapSlop).contains(point) {
+            } else if petHitRect(model.pet).contains(point) {
                 onPetTap?()
             } else if regions.middle.contains(point) {
                 onGroundTap?(point.x)
+            }
+        case .playback:
+            if regions.previous.contains(point) {
+                if model.media.canSkip { onPreviousTrack?() }
+            } else if regions.playPause.contains(point) {
+                if model.media.canPlayPause { onTogglePlayPause?() }
+            } else if regions.next.contains(point) {
+                if model.media.canSkip { onNextTrack?() }
+            } else if petHitRect(model.pet).contains(point) {
+                onPetTap?()
+            } else if regions.trail.contains(point) && model.media.canSeek {
+                let engine = LayoutEngine(bounds: regions.full, backingScale: backingScale, page: .playback)
+                onSeek?(engine.trailFraction(x: point.x, spriteHalfWidth: petHalfWidth))
             }
         }
     }

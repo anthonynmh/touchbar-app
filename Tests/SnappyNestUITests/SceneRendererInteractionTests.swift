@@ -20,7 +20,7 @@ final class SceneRendererInteractionTests: XCTestCase {
         XCTAssertTrue(renderer.acceptsFirstMouse(for: nil))
     }
 
-    func testTapRoutesToBrightnessVolumeAndPlayPause() {
+    func testTapRoutesToBrightnessAndVolume() {
         let renderer = makeRenderer()
         let model = makeModel(page: .controls)
         renderer.update(model: model)
@@ -34,11 +34,81 @@ final class SceneRendererInteractionTests: XCTestCase {
 
         renderer.handleTap(at: CGPoint(x: model.layout.brightness.midX, y: 15))
         renderer.handleTap(at: CGPoint(x: model.layout.volume.midX, y: 15))
-        renderer.handleTap(at: CGPoint(x: model.layout.playPause.midX, y: 15))
+        renderer.handleTap(at: CGPoint(x: model.layout.battery.midX, y: 15))
 
         XCTAssertEqual(brightness ?? -1, 0.5, accuracy: 1e-6)
         XCTAssertEqual(volume ?? -1, 0.5, accuracy: 1e-6)
-        XCTAssertEqual(toggleCount, 1)
+        XCTAssertEqual(toggleCount, 0, "play/pause lives on the playback page now")
+    }
+
+    func testPlaybackSignpostsRouteToSkipAndPlayPause() {
+        let renderer = makeRenderer()
+        let model = makeModel(page: .playback)
+        renderer.update(model: model)
+        var previous = 0, next = 0, toggles = 0
+        var seek: Double?
+        renderer.onPreviousTrack = { previous += 1 }
+        renderer.onNextTrack = { next += 1 }
+        renderer.onTogglePlayPause = { toggles += 1 }
+        renderer.onSeek = { seek = $0 }
+
+        renderer.handleTap(at: CGPoint(x: model.layout.previous.midX, y: 15))
+        renderer.handleTap(at: CGPoint(x: model.layout.playPause.midX, y: 15))
+        renderer.handleTap(at: CGPoint(x: model.layout.next.midX, y: 15))
+        XCTAssertEqual([previous, toggles, next], [1, 1, 1])
+        XCTAssertNil(seek)
+
+        // Unavailable media: the signposts are inert.
+        renderer.update(model: makeModel(page: .playback, media: MediaSnapshot(identity: "none", state: .unknown)))
+        renderer.handleTap(at: CGPoint(x: model.layout.previous.midX, y: 15))
+        renderer.handleTap(at: CGPoint(x: model.layout.playPause.midX, y: 15))
+        renderer.handleTap(at: CGPoint(x: model.layout.next.midX, y: 15))
+        XCTAssertEqual([previous, toggles, next], [1, 1, 1])
+    }
+
+    func testTapOnTheTrailSeeksToThatFraction() {
+        let renderer = makeRenderer()
+        let model = makeModel(page: .playback)
+        renderer.update(model: model)
+        var seek: Double?
+        var petTaps = 0
+        renderer.onSeek = { seek = $0 }
+        renderer.onPetTap = { petTaps += 1 }
+
+        let engine = LayoutEngine(bounds: bounds, backingScale: 2, page: .playback)
+        let x = engine.trailX(fraction: 0.8, spriteHalfWidth: 12)
+        renderer.handleTap(at: CGPoint(x: x, y: 20))
+        XCTAssertEqual(seek ?? -1, 0.8, accuracy: 1e-9)
+        XCTAssertEqual(petTaps, 0)
+
+        // The pet itself still takes the tap.
+        let pet = model.pet.hitRect(spriteSize: PetSprites.cellSize)
+        renderer.handleTap(at: CGPoint(x: pet.midX, y: pet.midY))
+        XCTAssertEqual(petTaps, 1)
+
+        // Media that cannot seek: trail taps do nothing.
+        seek = nil
+        let noSeek = MediaSnapshot(identity: "browser", state: .playing, elapsed: 1, duration: 2, elapsedAt: Date(),
+                                   rate: 1, canPlayPause: true, canReadPosition: true, canReadDuration: true, canSeek: false)
+        renderer.update(model: makeModel(page: .playback, media: noSeek))
+        renderer.handleTap(at: CGPoint(x: x, y: 20))
+        XCTAssertNil(seek)
+    }
+
+    func testDragStartingOnThePetScrubsOnlyOnThePlaybackPage() {
+        let renderer = makeRenderer()
+        let playback = makeModel(page: .playback)
+        renderer.update(model: playback)
+        let pet = playback.pet.hitRect(spriteSize: PetSprites.cellSize)
+        XCTAssertTrue(renderer.isScrubPoint(CGPoint(x: pet.midX, y: pet.midY)))
+        XCTAssertTrue(renderer.isScrubPoint(CGPoint(x: pet.maxX + SceneRenderer.tapSlop - 1, y: pet.midY)))
+        XCTAssertFalse(renderer.isScrubPoint(CGPoint(x: pet.maxX + 40, y: pet.midY)))
+
+        let world = makeModel(page: .world)
+        renderer.update(model: world)
+        let worldPet = world.pet.hitRect(spriteSize: PetSprites.cellSize)
+        XCTAssertFalse(renderer.isScrubPoint(CGPoint(x: worldPet.midX, y: worldPet.midY)),
+                       "on the world page a drag on the pet pans the scene")
     }
 
     func testPanClampsControlValues() {
@@ -130,15 +200,31 @@ final class SceneRendererInteractionTests: XCTestCase {
         renderer.beginCameraDrag()
         renderer.moveCameraDrag(translationX: -100)
         renderer.endCameraDrag(velocityX: 0)
-        XCTAssertFalse(renderer.isShowingControls)
+        XCTAssertEqual(renderer.currentPage, .world)
         XCTAssertEqual(pages, [])
 
         // Dragging past halfway commits to the controls page.
         renderer.beginCameraDrag()
         renderer.moveCameraDrag(translationX: -(bounds.width / 2 + 10))
         renderer.endCameraDrag(velocityX: 0)
-        XCTAssertTrue(renderer.isShowingControls)
+        XCTAssertEqual(renderer.currentPage, .controls)
         XCTAssertEqual(pages, [.controls])
+
+        // From the world, dragging right past halfway reaches the playback page.
+        renderer.update(model: makeModel(page: .world))
+        renderer.beginCameraDrag()
+        renderer.moveCameraDrag(translationX: bounds.width / 2 + 10)
+        renderer.endCameraDrag(velocityX: 0)
+        XCTAssertEqual(renderer.currentPage, .playback)
+        XCTAssertEqual(pages, [.controls, .playback])
+
+        // The camera clamps at the ends: a huge drag from playback stays there.
+        renderer.update(model: makeModel(page: .playback))
+        renderer.beginCameraDrag()
+        renderer.moveCameraDrag(translationX: 5000)
+        renderer.endCameraDrag(velocityX: 0)
+        XCTAssertEqual(renderer.currentPage, .playback)
+        XCTAssertEqual(pages, [.controls, .playback])
     }
 
     func testFlickCommitsRegardlessOfDistance() {
@@ -150,26 +236,38 @@ final class SceneRendererInteractionTests: XCTestCase {
         renderer.beginCameraDrag()
         renderer.moveCameraDrag(translationX: -20)
         renderer.endCameraDrag(velocityX: -(SceneRenderer.flickVelocity + 1))
-        XCTAssertTrue(renderer.isShowingControls)
+        XCTAssertEqual(renderer.currentPage, .controls)
 
         renderer.update(model: makeModel(page: .controls))
         renderer.beginCameraDrag()
         renderer.moveCameraDrag(translationX: 20)
         renderer.endCameraDrag(velocityX: SceneRenderer.flickVelocity + 1)
-        XCTAssertFalse(renderer.isShowingControls)
-        XCTAssertEqual(pages, [.controls, .world])
+        XCTAssertEqual(renderer.currentPage, .world)
+
+        // A flick moves exactly one page: world → playback, never past it.
+        renderer.update(model: makeModel(page: .world))
+        renderer.beginCameraDrag()
+        renderer.moveCameraDrag(translationX: 20)
+        renderer.endCameraDrag(velocityX: SceneRenderer.flickVelocity + 1)
+        XCTAssertEqual(renderer.currentPage, .playback)
+        renderer.update(model: makeModel(page: .playback))
+        renderer.beginCameraDrag()
+        renderer.moveCameraDrag(translationX: 20)
+        renderer.endCameraDrag(velocityX: SceneRenderer.flickVelocity + 1)
+        XCTAssertEqual(renderer.currentPage, .playback)
+        XCTAssertEqual(pages, [.controls, .world, .playback])
     }
 
     func testOwnerPageChangePansTheCamera() {
         let renderer = makeRenderer()
         renderer.update(model: makeModel(page: .world))
-        XCTAssertFalse(renderer.isShowingControls)
+        XCTAssertEqual(renderer.currentPage, .world)
         renderer.update(model: makeModel(page: .controls))
-        XCTAssertTrue(renderer.isShowingControls)
+        XCTAssertEqual(renderer.currentPage, .controls)
         XCTAssertNotNil(renderer.layer?.sublayers?.compactMap { $0.animation(forKey: "pageSlide") }.first,
                         "an owner-driven page change should slide, not jump")
-        renderer.update(model: makeModel(page: .world))
-        XCTAssertFalse(renderer.isShowingControls)
+        renderer.update(model: makeModel(page: .playback))
+        XCTAssertEqual(renderer.currentPage, .playback)
     }
 
     func testDragStartingOnASliderScrubsInsteadOfPanning() {
@@ -179,7 +277,6 @@ final class SceneRendererInteractionTests: XCTestCase {
         XCTAssertTrue(renderer.isSliderPoint(CGPoint(x: controls.layout.brightness.midX, y: 15)))
         XCTAssertTrue(renderer.isSliderPoint(CGPoint(x: controls.layout.volume.midX, y: 15)))
         XCTAssertFalse(renderer.isSliderPoint(CGPoint(x: controls.layout.battery.midX, y: 15)))
-        XCTAssertFalse(renderer.isSliderPoint(CGPoint(x: controls.layout.playPause.midX, y: 15)))
 
         let world = makeModel(page: .world)
         renderer.update(model: world)
@@ -191,15 +288,17 @@ final class SceneRendererInteractionTests: XCTestCase {
         SceneRenderer(frame: bounds)
     }
 
-    private func makeModel(page: LayoutEngine.Page = .world, brightnessAvailable: Bool = true) -> SceneModel {
+    private func makeModel(page: LayoutEngine.Page = .world, brightnessAvailable: Bool = true,
+                           media: MediaSnapshot? = nil) -> SceneModel {
         let engine = LayoutEngine(bounds: bounds, backingScale: 2, page: page)
         let layout = engine.regions
         let world = engine.with(page: .world).regions
         let time = WorldTime(hour: 12, minute: 0, second: 0)
+        let petX = page == .playback ? engine.trailX(fraction: 0.5, spriteHalfWidth: 12) : world.middle.minX + 80
         let pet = PetState(action: .idle, facing: .right,
-                           position: CGPoint(x: world.middle.minX + 80, y: world.middle.maxY - 4),
+                           position: CGPoint(x: petX, y: world.middle.maxY - 4),
                            frameIndex: 0)
-        let media = MediaSnapshot(
+        let media = media ?? MediaSnapshot(
             identity: "test",
             state: .paused,
             elapsed: 1,
@@ -208,7 +307,9 @@ final class SceneRendererInteractionTests: XCTestCase {
             rate: 0,
             canPlayPause: true,
             canReadPosition: true,
-            canReadDuration: true
+            canReadDuration: true,
+            canSeek: true,
+            canSkip: true
         )
         return SceneModel(
             time: time,

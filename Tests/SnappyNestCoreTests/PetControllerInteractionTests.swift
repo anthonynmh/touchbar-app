@@ -37,11 +37,16 @@ final class PetControllerInteractionTests: XCTestCase {
         let c = PetController(seed: 3, layout: layout())
         let media = MediaSnapshot(identity: "spotify", state: .playing, elapsed: 30, duration: 120, elapsedAt: t0, rate: 1, canPlayPause: true, canReadPosition: true, canReadDuration: true)
         c.tick(now: t0, media: media)
-        c.tapPet(now: t0)
-        XCTAssertEqual(c.state.action, .happy)
-        c.tick(now: t0.addingTimeInterval(3), media: media)
+        c.enter(.playback, now: t0)
+        var now = t0
+        for _ in 0..<80 { now = now.addingTimeInterval(0.25); c.tick(now: now, media: media) }
         XCTAssertEqual(c.state.action, .progressFollow)
-        let expected = layout().petGroundX(fraction: 33.0 / 120.0, spriteHalfWidth: 12)
+        c.tapPet(now: now)
+        XCTAssertEqual(c.state.action, .happy)
+        now = now.addingTimeInterval(3)
+        c.tick(now: now, media: media)
+        XCTAssertEqual(c.state.action, .progressFollow)
+        let expected = layout().trailX(fraction: 53.0 / 120.0, spriteHalfWidth: 12)
         XCTAssertEqual(c.state.position.x, expected, accuracy: 1e-6)
     }
 
@@ -68,14 +73,16 @@ final class PetControllerInteractionTests: XCTestCase {
         XCTAssertEqual(c.state.action, .inspect)
     }
 
-    func testWalkToFarAwayDashesAndClampsInsideMiddle() {
+    func testWalkToClampsInsideMiddleAndAlwaysWalksOnOneTap() {
         let c = PetController(seed: 3, layout: layout())
         c.tick(now: t0, media: .unknown)
         let middle = layout().regions.middle
         c.walkTo(x: middle.maxX + 500, now: t0)
-        XCTAssertEqual(c.state.action, .dash)
+        XCTAssertEqual(c.state.action, .walk, "distance alone never sprints")
+        // ~490 pt at walkSpeed is ~35 s; check inside the 3 s inspect hold after that.
+        let travel = TimeInterval((middle.maxX - 12 - c.state.position.x) / PetController.walkSpeed)
         var now = t0
-        for _ in 0..<200 {
+        while now < t0.addingTimeInterval(travel + 1) {
             now = now.addingTimeInterval(0.25)
             c.tick(now: now, media: .unknown)
         }
@@ -83,12 +90,32 @@ final class PetControllerInteractionTests: XCTestCase {
         XCTAssertLessThanOrEqual(c.state.hitRect(spriteSize: CGSize(width: 24, height: 24)).maxX, middle.maxX + 1e-6)
     }
 
-    func testWalkToIgnoredDuringProgressFollow() {
+    func testQuickSecondGroundTapUpgradesTheWalkToASprint() {
         let c = PetController(seed: 3, layout: layout())
-        let media = MediaSnapshot(identity: "spotify", state: .playing, elapsed: 30, duration: 120, elapsedAt: t0, rate: 1, canPlayPause: true, canReadPosition: true, canReadDuration: true)
-        c.tick(now: t0, media: media)
-        c.walkTo(x: 100, now: t0)
-        XCTAssertEqual(c.state.action, .progressFollow)
+        c.tick(now: t0, media: .unknown)
+        let target = c.state.position.x + 200
+        c.walkTo(x: target, now: t0)
+        XCTAssertEqual(c.state.action, .walk)
+        c.walkTo(x: target + 10, now: t0.addingTimeInterval(0.3))
+        XCTAssertEqual(c.state.action, .dash)
+        var now = t0.addingTimeInterval(0.3)
+        for _ in 0..<24 { // 6 s: a 210 pt dash takes < 5 s
+            now = now.addingTimeInterval(0.25)
+            c.tick(now: now, media: .unknown)
+        }
+        XCTAssertEqual(c.state.position.x, target + 10, accuracy: 1e-6)
+        XCTAssertEqual(c.state.action, .inspect)
+    }
+
+    func testSlowOrFarSecondTapStaysAWalk() {
+        let c = PetController(seed: 3, layout: layout())
+        c.tick(now: t0, media: .unknown)
+        let target = c.state.position.x + 200
+        c.walkTo(x: target, now: t0)
+        c.walkTo(x: target, now: t0.addingTimeInterval(PetController.sprintTapWindow + 0.1))
+        XCTAssertEqual(c.state.action, .walk, "too slow")
+        c.walkTo(x: target - 150, now: t0.addingTimeInterval(PetController.sprintTapWindow + 0.2))
+        XCTAssertEqual(c.state.action, .walk, "a different spot restarts the walk")
     }
 
     func testFreeRoamWalksActuallyMoveAndStayInsideMiddle() {

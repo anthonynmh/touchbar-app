@@ -23,6 +23,7 @@ public enum PetSprites {
         case .surprised: return [4, 2, 0][f]
         case .celebrate: return f == 1 ? 2 : 0
         case .walk, .progressFollow: return f == 1 ? 1 : 0
+        case .suitUp:    return f == 2 ? 1 : 0   // little hop as the hat lands
         default:         return 0
         }
     }
@@ -71,6 +72,9 @@ public enum PetSprites {
         var accent: Accent = .none
         var speedLines = false
         var tailUp = true
+        var hat: CGFloat? = nil         // hard hat; value = lift above the head
+        var spanner = false
+        var spannerTilt: CGFloat = 0
     }
 
     private enum Accent { case none, question, sparkle, star, zee, note, heart, droplets, exclaim }
@@ -144,6 +148,24 @@ public enum PetSprites {
             p.accent = .exclaim
             p.bodyDY = f == 0 ? 2 : 0
             p.bodyDX = f == 0 ? -1 : 0
+        case .suitUp:
+            // The hat drops from above and squashes the pet a little on landing.
+            p.eyes = f == 3 ? .happy : .up
+            p.hat = [7, 4, 1, 0][f]
+            p.bodyDY = f == 2 ? -1 : 0
+            p.bodyDX = f == 2 ? 1 : 0
+            p.mouth = f == 3 ? .smile : .small
+        case .suitDown:
+            p.eyes = f == 3 ? .open : .up
+            p.hat = [0, 1, 4, 7][f]
+            p.mouth = .small
+        case .tinker:
+            p.hat = 0
+            p.spanner = true
+            p.spannerTilt = [0, -1, 0, 1][f]
+            p.eyes = f == 2 ? .closed : .side
+            p.mouth = f == 1 || f == 3 ? .smile : .small
+            p.bodyDY = f == 1 || f == 3 ? -1 : 0
         }
         return p
     }
@@ -250,6 +272,40 @@ public enum PetSprites {
             ctx.fill(CGRect(x: body.midX + 2, y: mouthY - 1, width: 1, height: 1))
         case .open:
             ctx.fillEllipse(in: CGRect(x: body.midX - 1.5, y: mouthY - 0.5, width: 3, height: 3))
+        }
+
+        // Spanner held out on the facing side, at belly height.
+        if p.spanner {
+            let sx = body.maxX - 2
+            let sy = body.midY + 1 + p.spannerTilt
+            ctx.setFillColor(outline)
+            ctx.fill(CGRect(x: sx - 1, y: sy - 1, width: 8, height: 4))
+            ctx.setFillColor(Palette.cream)
+            ctx.fill(CGRect(x: sx, y: sy, width: 5, height: 2))
+            ctx.fill(CGRect(x: sx + 5, y: sy - 1, width: 2, height: 4))
+            ctx.setFillColor(outline)
+            ctx.fill(CGRect(x: sx + 6, y: sy, width: 1, height: 2))   // open jaw
+        }
+
+        // Hard hat: a golden dome with a brim, sitting on the head between the
+        // ears. `lift` raises it for the drop-on / pop-off clips.
+        if let lift = p.hat {
+            let hatW: CGFloat = 14
+            let hx = body.midX - hatW / 2
+            let brimY = by - 1 - lift
+            ctx.saveGState()
+            ctx.clip(to: CGRect(x: 0, y: -20, width: W, height: brimY + 20))
+            ctx.setFillColor(outline)
+            ctx.fillEllipse(in: CGRect(x: hx + 1, y: brimY - 7, width: hatW - 2, height: 14))
+            ctx.setFillColor(Palette.golden)
+            ctx.fillEllipse(in: CGRect(x: hx + 2, y: brimY - 6, width: hatW - 4, height: 12))
+            ctx.setFillColor(Palette.cream)
+            ctx.fill(CGRect(x: hx + 4, y: brimY - 4, width: 2, height: 2))
+            ctx.restoreGState()
+            ctx.setFillColor(outline)
+            ctx.fill(CGRect(x: hx - 1, y: brimY - 1, width: hatW + 2, height: 3))
+            ctx.setFillColor(Palette.golden)
+            ctx.fill(CGRect(x: hx, y: brimY, width: hatW, height: 1))
         }
 
         // Speed lines trail behind a dashing pet.

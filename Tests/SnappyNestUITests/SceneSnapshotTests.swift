@@ -61,8 +61,11 @@ final class SceneSnapshotTests: XCTestCase {
             ControlGlyphs.volume(level: 0.8, muted: false, available: true, scale: scale),
             ControlGlyphs.volume(level: 0.8, muted: true, available: true, scale: scale),
             ControlGlyphs.volume(level: 0.8, muted: false, available: false, scale: scale),
-            ControlGlyphs.playPause(isPlaying: true, scale: scale),
-            ControlGlyphs.playPause(isPlaying: false, scale: scale)
+            SignpostGlyphs.image(.previous, available: true, scale: scale),
+            SignpostGlyphs.image(.playPause, isPlaying: true, available: true, scale: scale),
+            SignpostGlyphs.image(.playPause, isPlaying: false, available: true, scale: scale),
+            SignpostGlyphs.image(.next, available: true, scale: scale),
+            SignpostGlyphs.image(.next, available: false, scale: scale)
         ]
         let sheet = CGSize(width: 32 * CGFloat(max(batteries.count, controls.count)), height: 64)
         let image = PetSprites.render(size: sheet, scale: scale * 3) { ctx in
@@ -115,13 +118,17 @@ final class SceneSnapshotTests: XCTestCase {
             try write(image, to: dir.appendingPathComponent(String(format: "scene-%02d%02d.png", hour, minute)))
         }
 
-        // The controls page at noon and at night.
+        // The controls page at noon and at night, with the hard-hat pet beside the cluster.
         for hour in [12, 22] {
             var comps = DateComponents(); comps.year = 2026; comps.month = 6; comps.day = 21; comps.hour = hour
             let now = cal.date(from: comps)!
             let controls = SceneComposer(layout: layout.with(page: .controls))
+            let pet = PetState(action: .tinker, facing: .right,
+                               position: CGPoint(x: controls.layout.regions.brightness.minX - PetController.workshopGap,
+                                                 y: bounds.maxY - 4),
+                               frameIndex: hour == 12 ? 1 : 0)
             let model = controls.compose(
-                now: now, calendar: cal, pet: .placeholder,
+                now: now, calendar: cal, pet: pet,
                 battery: BatterySnapshot(isPresent: true, percentage: 0.64, isCharging: hour == 22),
                 brightness: (0.6, true), volume: (0.35, false, true),
                 media: MediaSnapshot(identity: "spotify", state: .playing, elapsed: 40, duration: 120,
@@ -129,6 +136,28 @@ final class SceneSnapshotTests: XCTestCase {
             )
             renderer.update(model: model)
             try write(try snapshot(renderer), to: dir.appendingPathComponent(String(format: "controls-%02d00.png", hour)))
+        }
+
+        // The playback page: following a track by day, and with nothing playing at night.
+        for (hour, playing) in [(12, true), (21, false)] {
+            var comps = DateComponents(); comps.year = 2026; comps.month = 6; comps.day = 21; comps.hour = hour
+            let now = cal.date(from: comps)!
+            let playback = SceneComposer(layout: layout.with(page: .playback))
+            let media = playing
+                ? MediaSnapshot(identity: "spotify", state: .playing, elapsed: 83, duration: 214, elapsedAt: now, rate: 1,
+                                canPlayPause: true, canReadPosition: true, canReadDuration: true, canSeek: true, canSkip: true)
+                : MediaSnapshot(identity: "spotify", state: .stopped, canPlayPause: true)
+            let x = playing ? layout.trailX(fraction: 83.0 / 214.0, spriteHalfWidth: 12)
+                            : layout.trailX(fraction: 0, spriteHalfWidth: 12)
+            let pet = PetState(action: playing ? .progressFollow : .sleep, facing: .right,
+                               position: CGPoint(x: x, y: bounds.maxY - 4), frameIndex: 1)
+            let model = playback.compose(
+                now: now, calendar: cal, pet: pet,
+                battery: BatterySnapshot(isPresent: true, percentage: 0.64, isCharging: false),
+                brightness: (0.6, true), volume: (0.35, false, true), media: media
+            )
+            renderer.update(model: model)
+            try write(try snapshot(renderer), to: dir.appendingPathComponent(String(format: "playback-%02d00.png", hour)))
         }
     }
 

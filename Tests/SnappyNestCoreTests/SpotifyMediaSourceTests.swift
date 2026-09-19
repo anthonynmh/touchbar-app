@@ -9,6 +9,9 @@ private final class FakeSpotifyScriptingBridge: SpotifyScriptingBridge {
     var scriptResult: String? = "playing|30|300|Song"
     private(set) var readCount = 0
     private(set) var playPauseCount = 0
+    private(set) var seeks: [TimeInterval] = []
+    private(set) var nextCount = 0
+    private(set) var previousCount = 0
 
     private var launch: (() -> Void)?
     private var terminate: (() -> Void)?
@@ -18,6 +21,9 @@ private final class FakeSpotifyScriptingBridge: SpotifyScriptingBridge {
     func runningApplication() -> (isRunning: Bool, isTerminated: Bool) { (running, terminated) }
     func readPlayerState() -> String? { readCount += 1; return scriptResult }
     func sendPlayPause() { playPauseCount += 1 }
+    func sendSeek(to seconds: TimeInterval) { seeks.append(seconds) }
+    func sendNextTrack() { nextCount += 1 }
+    func sendPreviousTrack() { previousCount += 1 }
     func observeWorkspace(launch: @escaping () -> Void, terminate: @escaping () -> Void) {
         self.launch = launch
         self.terminate = terminate
@@ -118,6 +124,30 @@ final class SpotifyMediaSourceTests: XCTestCase {
         bridge.terminated = false
         source.togglePlayPause()
         XCTAssertEqual(bridge.playPauseCount, 1)
+    }
+
+    func testSeekAndSkipPassTheSameLaunchGateAsPlayPause() {
+        let bridge = FakeSpotifyScriptingBridge()
+        bridge.running = false
+        let source = makeSource(bridge)
+        source.seek(to: 42)
+        source.nextTrack()
+        source.previousTrack()
+        XCTAssertEqual(bridge.seeks, [])
+        XCTAssertEqual(bridge.nextCount, 0)
+        XCTAssertEqual(bridge.previousCount, 0)
+
+        bridge.fireLaunch()
+        let readsBefore = bridge.readCount
+        source.seek(to: 42)
+        source.nextTrack()
+        source.previousTrack()
+        XCTAssertEqual(bridge.seeks, [42])
+        XCTAssertEqual(bridge.nextCount, 1)
+        XCTAssertEqual(bridge.previousCount, 1)
+        XCTAssertEqual(bridge.readCount, readsBefore + 3, "each command reads the state back")
+        XCTAssertTrue(source.snapshot.canSeek)
+        XCTAssertTrue(source.snapshot.canSkip)
     }
 
     func testPlayingNotificationTriggersRefresh() {

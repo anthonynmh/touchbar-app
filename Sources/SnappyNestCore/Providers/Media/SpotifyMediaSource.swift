@@ -12,6 +12,9 @@ internal protocol SpotifyScriptingBridge: AnyObject {
     /// string, `"not_running"`, or nil on any AppleScript error.
     func readPlayerState() -> String?
     func sendPlayPause()
+    func sendSeek(to seconds: TimeInterval)
+    func sendNextTrack()
+    func sendPreviousTrack()
     func observeWorkspace(launch: @escaping () -> Void, terminate: @escaping () -> Void)
     func observePlaybackStateChanged(_ handler: @escaping ([AnyHashable: Any]?) -> Void)
 }
@@ -70,9 +73,34 @@ private final class SystemSpotifyScriptingBridge: SpotifyScriptingBridge {
     end if
     """
 
+    private static let nextSource = """
+    if application "Spotify" is running then
+        tell application "Spotify" to next track
+    end if
+    """
+
+    private static let previousSource = """
+    if application "Spotify" is running then
+        tell application "Spotify" to previous track
+    end if
+    """
+
+    /// The position is substituted per call; the script is compiled each
+    /// time but only after the source's launch gate has passed.
+    private static func seekSource(seconds: TimeInterval) -> String {
+        let clamped = max(0, seconds.isFinite ? seconds : 0)
+        return """
+        if application "Spotify" is running then
+            tell application "Spotify" to set player position to \(String(format: "%.2f", clamped))
+        end if
+        """
+    }
+
     // Compiled once; NSAppleScript is only ever used from the source's serial queue.
     private lazy var stateScript = NSAppleScript(source: Self.scriptSource)
     private lazy var playPauseScript = NSAppleScript(source: Self.playPauseSource)
+    private lazy var nextScript = NSAppleScript(source: Self.nextSource)
+    private lazy var previousScript = NSAppleScript(source: Self.previousSource)
     private var observers: [NSObjectProtocol] = []
 
     func isInstalled() -> Bool {
@@ -96,6 +124,21 @@ private final class SystemSpotifyScriptingBridge: SpotifyScriptingBridge {
     func sendPlayPause() {
         var err: NSDictionary?
         _ = playPauseScript?.executeAndReturnError(&err)
+    }
+
+    func sendSeek(to seconds: TimeInterval) {
+        var err: NSDictionary?
+        _ = NSAppleScript(source: Self.seekSource(seconds: seconds))?.executeAndReturnError(&err)
+    }
+
+    func sendNextTrack() {
+        var err: NSDictionary?
+        _ = nextScript?.executeAndReturnError(&err)
+    }
+
+    func sendPreviousTrack() {
+        var err: NSDictionary?
+        _ = previousScript?.executeAndReturnError(&err)
     }
 
     func observeWorkspace(launch: @escaping () -> Void, terminate: @escaping () -> Void) {
@@ -305,7 +348,9 @@ public final class SpotifyMediaSource: MediaSource {
             title: name.isEmpty ? nil : name,
             canPlayPause: true,
             canReadPosition: pos >= 0,
-            canReadDuration: dur > 0
+            canReadDuration: dur > 0,
+            canSeek: pos >= 0 && dur > 0,
+            canSkip: true
         )
     }
 
@@ -319,11 +364,29 @@ public final class SpotifyMediaSource: MediaSource {
 
     /// No-op unless Spotify is running: the pet must never launch Spotify.
     public func togglePlayPause() {
+        send { $0.sendPlayPause() }
+    }
+
+    public func seek(to seconds: TimeInterval) {
+        send { $0.sendSeek(to: seconds) }
+    }
+
+    public func nextTrack() {
+        send { $0.sendNextTrack() }
+    }
+
+    public func previousTrack() {
+        send { $0.sendPreviousTrack() }
+    }
+
+    /// Every command passes the same gate as reads, then refreshes sooner
+    /// than the next poll so the readback confirms the change.
+    private func send(_ command: @escaping (SpotifyScriptingBridge) -> Void) {
         guard shouldScript() else { return }
         dispatch.background { [weak self] in
-            self?.bridge.sendPlayPause()
-            self?.dispatch.main { [weak self] in
-                // Refresh sooner than the next poll.
+            guard let self = self else { return }
+            command(self.bridge)
+            self.dispatch.main { [weak self] in
                 self?.refresh()
             }
         }

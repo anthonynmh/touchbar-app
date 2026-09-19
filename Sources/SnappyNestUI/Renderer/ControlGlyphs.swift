@@ -1,10 +1,9 @@
 import AppKit
 import CoreGraphics
 
-/// Small icons for the slider controls and the play/pause button.
+/// Small icons for the slider controls.
 public enum ControlGlyphs {
     public static let size = CGSize(width: 12, height: 12)
-    public static let playPauseSize = CGSize(width: 20, height: 20)
 
     private static var cache: [String: CGImage] = [:]
 
@@ -61,30 +60,6 @@ public enum ControlGlyphs {
                     ctx.move(to: CGPoint(x: 8, y: 3))
                     ctx.addLine(to: CGPoint(x: 11.5, y: 9))
                     ctx.strokePath()
-                }
-            }
-        }
-    }
-
-    /// Play triangle or pause bars inside a circle outline.
-    public static func playPause(isPlaying: Bool, scale: CGFloat) -> CGImage {
-        cached("playpause:\(isPlaying)@\(scale)") {
-            PetSprites.render(size: playPauseSize, scale: scale) { ctx in
-                ctx.setShouldAntialias(true)
-                ctx.setStrokeColor(Palette.cream.copy(alpha: 0.7) ?? Palette.cream)
-                ctx.setLineWidth(1)
-                ctx.strokeEllipse(in: CGRect(x: 0.5, y: 0.5, width: 19, height: 19))
-                ctx.setFillColor(Palette.cream)
-                if isPlaying {
-                    ctx.fill(CGRect(x: 6.5, y: 6, width: 2.5, height: 8))
-                    ctx.fill(CGRect(x: 11, y: 6, width: 2.5, height: 8))
-                } else {
-                    ctx.beginPath()
-                    ctx.move(to: CGPoint(x: 7.5, y: 5.5))
-                    ctx.addLine(to: CGPoint(x: 7.5, y: 14.5))
-                    ctx.addLine(to: CGPoint(x: 14.5, y: 10))
-                    ctx.closePath()
-                    ctx.fillPath()
                 }
             }
         }
