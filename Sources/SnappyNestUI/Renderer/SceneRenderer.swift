@@ -557,6 +557,7 @@ public final class SceneRenderer: NSView {
     private func paintPet(state: PetState) {
         let size = PetSprites.cellSize
         petLayer.contents = PetSprites.image(
+            species: state.species,
             action: state.action,
             frame: state.frameIndex,
             facing: state.facing,
@@ -564,7 +565,7 @@ public final class SceneRenderer: NSView {
         )
         // Anchor: horizontal center of sprite, feet on the ground line. Hop
         // frames lift the whole cell.
-        let lift = PetSprites.lift(action: state.action, frame: state.frameIndex)
+        let lift = PetSprites.lift(species: state.species, action: state.action, frame: state.frameIndex)
         let x = (state.position.x - size.width / 2).rounded()
         let y = state.position.y - size.height - lift
         petLayer.frame = CGRect(x: x, y: y, width: size.width, height: size.height)

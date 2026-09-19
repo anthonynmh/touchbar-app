@@ -17,6 +17,12 @@ final class SceneSnapshotTests: XCTestCase {
 
     func testWritePetClipSheet() throws {
         guard let dir = outputDir else { throw XCTSkip("SNAPPY_SNAPSHOT_DIR not set") }
+        for species in PetSpecies.allCases {
+            try writePetClipSheet(species, to: dir)
+        }
+    }
+
+    private func writePetClipSheet(_ species: PetSpecies, to dir: URL) throws {
         let cell = PetSprites.cellSize
         let actions = PetAction.allCases
         let maxFrames = actions.map(\.frameCount).max() ?? 1
@@ -28,7 +34,7 @@ final class SceneSnapshotTests: XCTestCase {
             for (row, action) in actions.enumerated() {
                 for frame in 0..<action.frameCount {
                     for (side, facing) in [PetFacing.right, .left].enumerated() {
-                        let img = PetSprites.image(action: action, frame: frame, facing: facing, scale: scale)
+                        let img = PetSprites.image(species: species, action: action, frame: frame, facing: facing, scale: scale)
                         let x = cell.width * CGFloat(frame + side * maxFrames)
                         let y = cell.height * CGFloat(row)
                         ctx.saveGState()
@@ -40,7 +46,7 @@ final class SceneSnapshotTests: XCTestCase {
                 }
             }
         }
-        try write(image, to: dir.appendingPathComponent("pet-clips.png"))
+        try write(image, to: dir.appendingPathComponent("pet-clips-\(species.rawValue).png"))
     }
 
     func testWriteGlyphSheet() throws {

@@ -89,12 +89,15 @@ public struct PetState: Equatable {
     public var facing: PetFacing
     public var position: CGPoint       // scene coords (flipped: y=0 at top)
     public var frameIndex: Int         // current clip frame
+    public var species: PetSpecies     // which body the renderer draws
 
-    public init(action: PetAction, facing: PetFacing, position: CGPoint, frameIndex: Int) {
+    public init(action: PetAction, facing: PetFacing, position: CGPoint, frameIndex: Int,
+                species: PetSpecies = .cat) {
         self.action = action
         self.facing = facing
         self.position = position
         self.frameIndex = frameIndex
+        self.species = species
     }
 
     /// The sprite cell rect for hit-testing: `position` is the bottom-center
