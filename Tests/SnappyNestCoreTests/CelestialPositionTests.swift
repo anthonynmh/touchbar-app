@@ -49,3 +49,30 @@ final class CelestialPositionTests: XCTestCase {
         XCTAssertEqual(noon.point.x, 300, accuracy: 1e-6)
     }
 }
+
+final class CelestialScheduleTests: XCTestCase {
+    private let size = CGSize(width: 1004, height: 30)
+    private let schedule = SolarSchedule(sunriseMinutes: 7 * 60, sunsetMinutes: 19 * 60)
+
+    func testSunRisesAtScheduledSunrise() {
+        let range: ClosedRange<CGFloat> = 100...900
+        let rise = CelestialSolver.position(
+            for: WorldTime(hour: 7, minute: 0, second: 0, schedule: schedule), sceneSize: size, horizontalRange: range)
+        XCTAssertEqual(rise.body, .sun)
+        XCTAssertEqual(rise.point.x, 100, accuracy: 1e-6)
+        let stillNight = CelestialSolver.position(
+            for: WorldTime(hour: 6, minute: 30, second: 0, schedule: schedule), sceneSize: size, horizontalRange: range)
+        XCTAssertEqual(stillNight.body, .moon)
+    }
+
+    func testMoonRisesAtScheduledSunset() {
+        let range: ClosedRange<CGFloat> = 100...900
+        let set = CelestialSolver.position(
+            for: WorldTime(hour: 19, minute: 0, second: 0, schedule: schedule), sceneSize: size, horizontalRange: range)
+        XCTAssertEqual(set.body, .moon)
+        XCTAssertEqual(set.point.x, 100, accuracy: 1e-6)
+        let stillDay = CelestialSolver.position(
+            for: WorldTime(hour: 18, minute: 30, second: 0, schedule: schedule), sceneSize: size, horizontalRange: range)
+        XCTAssertEqual(stillDay.body, .sun)
+    }
+}

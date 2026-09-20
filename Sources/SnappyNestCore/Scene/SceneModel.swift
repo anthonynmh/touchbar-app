@@ -62,6 +62,7 @@ public struct SceneComposer {
     public func compose(
         now: Date,
         calendar: Calendar = .current,
+        schedule: SolarSchedule = .stylized,
         pet: PetState,
         battery: BatterySnapshot,
         brightness: (value: Double, available: Bool),
@@ -69,7 +70,7 @@ public struct SceneComposer {
         media: MediaSnapshot
     ) -> SceneModel {
         let regions = layout.regions
-        let time = WorldTime(from: now, in: calendar)
+        let time = WorldTime(from: now, in: calendar, schedule: schedule)
         // The sun/moon and props belong to the world page; on the controls
         // page they are computed for the world geometry and simply not drawn.
         let world = layout.with(page: .world).regions.middle

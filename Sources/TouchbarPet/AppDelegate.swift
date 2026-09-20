@@ -20,6 +20,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var mediaBrowser: MediaSource!
     private var pet: PetController!
     private var composer: SceneComposer!
+    private let solar = SolarScheduleCache()
 
     private var tickTimer: Timer?
     private var spriteTimer: Timer?
@@ -62,6 +63,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSLog("[SnappyNest] mediaremote host library=%@", hostLibrary?.path ?? "missing")
         mediaBrowser = MediaRemoteSource(hostLibraryURL: hostLibrary)
         NSLog("[SnappyNest] providers ready")
+        logSolarSchedule()
 
         // Preferences
         let defaults = UserDefaults.standard
@@ -259,6 +261,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if case .supported = volume.capability { volAvail = true } else { volAvail = false }
         let model = composer.compose(
             now: now,
+            schedule: solar.schedule(for: now),
             pet: pet.state,
             battery: battery.snapshot,
             brightness: (bright, brightAvail),
@@ -267,6 +270,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         renderer.update(model: model)
         preview?.update(model: model)
+    }
+
+    private func logSolarSchedule() {
+        let schedule = solar.schedule(for: clock.now)
+        guard let r = solar.lastResolved else { return }
+        let hhmm: (Double) -> String = { m in
+            String(format: "%02d:%02d", Int(m) / 60, Int(m) % 60)
+        }
+        let coords = r.coordinates.map { String(format: "%.2f,%.2f", $0.latitude, $0.longitude) } ?? "none"
+        NSLog("[SnappyNest] solar tz=%@ coords=%@ sunrise=%@ sunset=%@%@",
+              r.zoneIdentifier, coords, hhmm(schedule.sunriseMinutes), hhmm(schedule.sunsetMinutes),
+              schedule == .stylized ? " (stylized)" : "")
     }
 
     private func currentMedia() -> MediaSnapshot {

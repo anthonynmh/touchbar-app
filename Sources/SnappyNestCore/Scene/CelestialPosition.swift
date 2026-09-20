@@ -34,9 +34,9 @@ public enum CelestialSolver {
     /// range by this so the body never overlaps the neighboring regions.
     public static let bodyHalfWidth: CGFloat = 8
 
-    /// The sun rises at the left end of `horizontalRange` at 06:00, peaks at
-    /// noon in the center, and sets at the right end at 18:00; the moon does
-    /// the same over 18:00 → 06:00 with its peak at midnight.
+    /// The sun rises at the left end of `horizontalRange` at the schedule's
+    /// sunrise, peaks in the center, and sets at the right end at sunset; the
+    /// moon does the same over sunset → next sunrise.
     public static func position(
         for time: WorldTime,
         sceneSize: CGSize,
