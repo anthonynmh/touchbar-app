@@ -29,6 +29,9 @@ public enum PetAction: String, CaseIterable, Equatable, Hashable {
     /// Page change: the pet poofs back in at its spot on the new page. Never
     /// scheduled.
     case teleportIn
+    /// Court: a racket swing at the ball, backswing to follow-through. Never
+    /// scheduled.
+    case swing
 
     public var suggestedFPS: Int {
         switch self {
@@ -39,6 +42,7 @@ public enum PetAction: String, CaseIterable, Equatable, Hashable {
         case .happy, .surprised:                  return 10
         case .suitUp, .suitDown:                  return 10
         case .teleportOut, .teleportIn:           return 10
+        case .swing:                              return 10
         case .tinker:                             return 4
         case .dash:                               return 12
         }
@@ -63,6 +67,7 @@ public enum PetAction: String, CaseIterable, Equatable, Hashable {
         case .surprised:                          return 3
         case .suitUp, .tinker, .suitDown:         return 4
         case .teleportOut, .teleportIn:           return 4
+        case .swing:                              return 4
         }
     }
 

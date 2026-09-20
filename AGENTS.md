@@ -121,6 +121,49 @@ same notes. Keep all content here; do not duplicate it in `CLAUDE.md`.
 - The sprite bitmap's colour management shifts `Palette.cream` by a few
   values (0xFBE7C0 → 0xFCEBCB); pixel probes in tests must use a tolerance.
 
+## Court findings
+
+- The tennis court is a fourth `LayoutEngine.Page` (`.court`) that is **not
+  in the swipe row**: it overlays the world at camera offset 0 (`index` 0,
+  listed last so `Page(index: 0)` stays `.world`) and is only reached by
+  tapping the court-gate prop (`SceneLayout.activityZone`). The renderer's
+  `courtContainer` sits above the three page containers and below the pet;
+  `paintCourt` hides it unless the model's page is `.court`. The world's sky
+  and sun stay visible above the hedge, which is intended.
+- On the court the pan gesture **is the swing** (`PanKind.swing`): a
+  rightward pan of at least `TennisGame.minSwipeDistance` maps its end
+  velocity to strength 0…1 via `TennisGame.fullStrengthVelocity`. The camera
+  never drags on the court, so the only ways out are the EXIT sign, the
+  45 s serve idle timeout in `AppDelegate`, and a page teleport
+  (`beginTransition` drops the match). `fullStrengthVelocity` started at
+  1400 pt/s and a short flick already overshot the court on hardware; it is
+  2800 now. Retune it, `maxRange` and `flightSpeed` together from what
+  `NSPanGestureRecognizer.velocity(in:)` reports (the app logs each swing's
+  strength).
+- `TennisGame` is a pure struct: flights and bounces are functions of the
+  injected `now` (`ballPosition(at:)`), so the 8 Hz sprite timer ticks the
+  controller while the page is `.court` and the renderer glides the ball
+  layer between ticks. Faults (net / out) are decided at launch but scored
+  when the ball comes down, so the flight is still shown. The pet's return
+  is judged at landing time from its x *before* it moves that tick.
+- The rally limiter is the pet's aim: `petAimSigma(rally)` grows 14 pt per
+  hit, so a perfect user eventually wins the point on a pet error. The user
+  wins outright by landing deeper than the pet can run in the flight time
+  (`petSpeed` 120 pt/s after `petReaction` 0.25 s from `petHomeX`); from
+  the serve that is roughly strength 0.91–0.94, just inside the baseline.
+- The pet's return is the `.swing` clip (4 frames at 10 fps, never
+  scheduled): `Pose.racket` carries the swing step and every species draws
+  `PetSprites.drawRacket` from a hand about four points inside its facing
+  edge. The racket is 7 points long because the 24-point cell has no room
+  for more at the contact frame; a wider cell would ripple into the trail
+  insets, hit rects and every `spriteHalfWidth: 12` in the tests.
+- The court image (`CourtPainter`) is cached per `SkyPainter.Key` and dims
+  with `time.daylight`; the net is painted into it (a `CAShapeLayer` net at
+  2 pt was invisible on the 7 pt surface band). The pet's feet stay on the
+  world ground line (`maxY - 4`), which is the near sideline.
+- The battery stays out of the pet: `PetControllerBatteryIndependenceTests`
+  runs a court visit and a swing inside its simulation.
+
 ## Volume control findings
 
 - Brightness and volume share the same renderer gesture routing; brightness
@@ -268,3 +311,28 @@ same notes. Keep all content here; do not duplicate it in `CLAUDE.md`.
   06:00 / 18:00 day as the default and fallback. The app logs
   `[SnappyNest] solar tz=… coords=… sunrise=… sunset=…` at launch for
   readback. 184 tests (181 + 3 snapshot writers). Hardware verification pending.
+- 2026-09-20 — `feat/keep-away-zone`: added the world page's first activity
+  zone. A stone nook at 31% of the ground holds a ball; tapping it starts
+  keep-away (`KeepAwayGame`, pure state machine): the ball is served away
+  from the pet, the pet chases at a per-round speed, taps on the ball kick
+  it away from the finger and stun the pet for the round's reaction time,
+  surviving 10 s wins the round, the pet reaching the ball wins the game.
+  Best rounds persist in `UserDefaults` (`keepAwayBestRounds`). Confirmed
+  battery was already decoupled from the pet (no controller/scheduler
+  input; acceptance test extended to cover a game). 209 tests (205 + 4
+  snapshot writers). Hardware verification pending.
+- 2026-09-20 — Keep-away kick input reworked: tap anywhere on the ground to
+  roll the ball toward that side; a rolling ball is only kickable once it
+  slows (ring cue). 210 tests (206 + 4 snapshot writers). Hardware
+  verification pending.
+- 2026-09-20 — Replaced keep-away with **tennis** on a separate court page:
+  the world prop is now a racket by a post that opens `.court`; the pet
+  teleports onto its half; rightward swipes serve and return with swipe
+  speed as strength; net / out / missed return lose the point; first to 2
+  (best of 3) with a persisted W/L tally; EXIT sign, idle timeout or a page
+  teleport leave. `CourtPainter` draws the court under the live sky. 205
+  tests (201 + 4 snapshot writers). Hardware verification pending.
+- 2026-09-20 — Tennis tuning after the first hardware play: pet run speed
+  90 → 120 pt/s, strong shots faster (`flightSpeed` 220 + 340·s), swipe
+  scale halved (`fullStrengthVelocity` 1400 → 2800 pt/s) because a short
+  flick overshot the court. The pet now returns with a racket (`.swing`).

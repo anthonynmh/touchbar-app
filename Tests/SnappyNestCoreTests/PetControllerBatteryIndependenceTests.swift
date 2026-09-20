@@ -21,6 +21,10 @@ final class PetControllerBatteryIndependenceTests: XCTestCase {
             var actions: [PetAction] = []
             for step in 0..<600 { // 10 minutes @ 1 Hz
                 let now = start.addingTimeInterval(TimeInterval(step))
+                // A tennis rally in the middle of the run: still no battery.
+                if step == 120 { controller.enter(.tennis, now: now) }
+                if step == 125 { controller.swing(strength: 0.7, now: now) }
+                if step == 160 { controller.enter(.roam, now: now) }
                 controller.tick(now: now, media: .unknown)
                 actions.append(controller.state.action)
                 _ = battery // reference retained to prove the pattern lives in scope

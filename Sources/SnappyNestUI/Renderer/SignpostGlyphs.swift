@@ -21,6 +21,27 @@ public enum SignpostGlyphs {
         return img
     }
 
+    /// The court's EXIT sign: a wider plank (34×20) on a post; the renderer
+    /// sets the word in a text layer over it.
+    public static let exitSize = CGSize(width: 34, height: 20)
+
+    public static func exitImage(scale: CGFloat) -> CGImage {
+        let key = "exit@\(scale)"
+        if let hit = cache[key] { return hit }
+        let img = PetSprites.render(size: exitSize, scale: scale) { ctx in
+            ctx.setFillColor(Palette.brown)
+            ctx.fill(CGRect(x: 16, y: 8, width: 2, height: 12))
+            ctx.fill(CGRect(x: 1, y: 1, width: 32, height: 12))
+            ctx.setFillColor(Palette.terrain)
+            ctx.fill(CGRect(x: 2, y: 2, width: 30, height: 10))
+            ctx.setFillColor(Palette.brown)
+            ctx.fill(CGRect(x: 3, y: 3, width: 1, height: 1))
+            ctx.fill(CGRect(x: 30, y: 3, width: 1, height: 1))
+        }
+        cache[key] = img
+        return img
+    }
+
     // Cell is 22×20, y grows downward; the post's foot is on the bottom edge.
     private static func draw(_ ctx: CGContext, kind: Kind, isPlaying: Bool, available: Bool) {
         let post = Palette.brown

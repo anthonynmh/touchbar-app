@@ -135,4 +135,41 @@ final class SceneComposerTests: XCTestCase {
         XCTAssertEqual(model.time.schedule, late)
         XCTAssertEqual(model.celestial.body, .moon)
     }
+
+    func testCourtGateZoneAndTennisOnlyOnTheCourtPage() {
+        let layout = LayoutEngine(bounds: bounds, backingScale: 2.0)
+        let middle = layout.regions.middle
+        let gateX = SceneLayout.courtGateX(inside: middle)
+        XCTAssertEqual(gateX, middle.minX + middle.width * 0.31, accuracy: 1e-9)
+        let zone = SceneLayout.activityZone(inside: middle)
+        XCTAssertEqual(zone.midX, gateX, accuracy: 1e-9)
+        XCTAssertEqual(zone.maxY, middle.maxY - 4 + SceneLayout.activityZoneSlop, accuracy: 1e-9)
+        XCTAssertEqual(zone.width, SceneLayout.propSize.width + 2 * SceneLayout.activityZoneSlop)
+        let gate = SceneLayout.defaultObjects(inside: middle).first { $0.prop == .courtGate }
+        XCTAssertEqual(gate?.position.x ?? -1, gateX, accuracy: 1e-9)
+
+        let now = noonUTC()
+        let battery = BatterySnapshot(isPresent: true, percentage: 0.8, isCharging: false)
+        let court = LayoutEngine(bounds: bounds, backingScale: 2.0, page: .court).regions.court
+        let game = TennisGame(court: court, groundY: bounds.maxY - 4, seed: 1)
+
+        let world = SceneComposer(layout: layout).compose(
+            now: now, calendar: fixedCalendar(), pet: .placeholder, battery: battery,
+            brightness: (0.5, true), volume: (0.4, false, true), media: .unknown,
+            tennis: game, tennisTally: (2, 1)
+        )
+        XCTAssertNil(world.tennis, "the match belongs to the court page")
+        XCTAssertFalse(world.props.isEmpty)
+
+        let courtModel = SceneComposer(layout: layout.with(page: .court)).compose(
+            now: now, calendar: fixedCalendar(), pet: .placeholder, battery: battery,
+            brightness: (0.5, true), volume: (0.4, false, true), media: .unknown,
+            tennis: game, tennisTally: (2, 1)
+        )
+        XCTAssertEqual(courtModel.tennis, game)
+        XCTAssertEqual(courtModel.tennisWins, 2)
+        XCTAssertEqual(courtModel.tennisLosses, 1)
+        XCTAssertTrue(courtModel.props.isEmpty, "no meadow props on the court")
+        XCTAssertEqual(courtModel.layout.page, .court)
+    }
 }

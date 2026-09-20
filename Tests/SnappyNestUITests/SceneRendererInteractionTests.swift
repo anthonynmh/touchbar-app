@@ -295,12 +295,13 @@ final class SceneRendererInteractionTests: XCTestCase {
     }
 
     private func makeModel(page: LayoutEngine.Page = .world, brightnessAvailable: Bool = true,
-                           media: MediaSnapshot? = nil) -> SceneModel {
+                           media: MediaSnapshot? = nil, tennis: TennisGame? = nil,
+                           petX: CGFloat? = nil) -> SceneModel {
         let engine = LayoutEngine(bounds: bounds, backingScale: 2, page: page)
         let layout = engine.regions
         let world = engine.with(page: .world).regions
         let time = WorldTime(hour: 12, minute: 0, second: 0)
-        let petX = page == .playback ? engine.trailX(fraction: 0.5, spriteHalfWidth: 12) : world.middle.minX + 80
+        let petX = petX ?? (page == .playback ? engine.trailX(fraction: 0.5, spriteHalfWidth: 12) : world.middle.minX + 80)
         let pet = PetState(action: .idle, facing: .right,
                            position: CGPoint(x: petX, y: world.middle.maxY - 4),
                            frameIndex: 0)
@@ -334,7 +335,78 @@ final class SceneRendererInteractionTests: XCTestCase {
             volumeMuted: false,
             volumeAvailable: true,
             media: media,
-            progressFraction: 0.5
+            progressFraction: 0.5,
+            tennis: tennis
         )
+    }
+
+    // MARK: - Court
+
+    private func courtGame() -> TennisGame {
+        let regions = LayoutEngine(bounds: bounds, backingScale: 2, page: .court).regions
+        return TennisGame(court: regions.court, groundY: bounds.maxY - 4, seed: 1)
+    }
+
+    func testCourtGateOpensTheCourtFromTheWorldPageOnly() {
+        let renderer = makeRenderer()
+        let model = makeModel(page: .world)
+        renderer.update(model: model)
+        var enters = 0, groundTaps = 0, petTaps = 0
+        renderer.onEnterCourt = { enters += 1 }
+        renderer.onGroundTap = { _ in groundTaps += 1 }
+        renderer.onPetTap = { petTaps += 1 }
+
+        let zone = SceneLayout.activityZone(inside: model.layout.middle)
+        renderer.handleTap(at: CGPoint(x: zone.midX, y: zone.midY))
+        XCTAssertEqual([enters, groundTaps], [1, 0])
+        XCTAssertFalse(renderer.isCourtVisible, "the owner decides the page")
+
+        // Just outside the gate is ordinary ground.
+        renderer.handleTap(at: CGPoint(x: zone.maxX + 2, y: zone.midY))
+        XCTAssertEqual([enters, groundTaps], [1, 1])
+
+        // The pet standing on the gate does not steal the tap.
+        renderer.update(model: makeModel(page: .world, petX: zone.midX))
+        renderer.handleTap(at: CGPoint(x: zone.midX, y: zone.midY))
+        XCTAssertEqual([enters, petTaps], [2, 0])
+
+        // Other pages have no gate.
+        renderer.update(model: makeModel(page: .controls))
+        renderer.handleTap(at: CGPoint(x: zone.midX, y: zone.midY))
+        XCTAssertEqual(enters, 2)
+    }
+
+    func testCourtExitSignAndSwing() {
+        let renderer = makeRenderer()
+        let model = makeModel(page: .court, tennis: courtGame(), petX: courtGame().petHomeX)
+        renderer.update(model: model)
+        XCTAssertTrue(renderer.isCourtVisible)
+        var exits = 0, groundTaps = 0
+        var swings: [Double] = []
+        renderer.onExitCourt = { exits += 1 }
+        renderer.onGroundTap = { _ in groundTaps += 1 }
+        renderer.onSwing = { swings.append($0) }
+
+        renderer.handleTap(at: CGPoint(x: model.layout.exitSign.midX, y: 15))
+        XCTAssertEqual(exits, 1)
+        renderer.handleTap(at: CGPoint(x: model.layout.court.midX, y: 20))
+        XCTAssertEqual(groundTaps, 0, "no walk-to on the court")
+
+        // A rightward swipe is a swing; its speed is the strength.
+        XCTAssertEqual(renderer.handleSwing(translationX: 60, velocityX: TennisGame.fullStrengthVelocity / 2) ?? -1,
+                       0.5, accuracy: 1e-9)
+        XCTAssertEqual(renderer.handleSwing(translationX: 200, velocityX: TennisGame.fullStrengthVelocity * 3) ?? -1,
+                       1, accuracy: 1e-9, "capped at full strength")
+        XCTAssertNil(renderer.handleSwing(translationX: -60, velocityX: -900), "a leftward swipe is nothing")
+        XCTAssertNil(renderer.handleSwing(translationX: 5, velocityX: 900), "too short to be a swing")
+        XCTAssertEqual(swings.count, 2)
+
+        // No camera drag starts on the court, and no swing off it.
+        XCTAssertFalse(renderer.isSliderPoint(CGPoint(x: model.layout.court.midX, y: 15)))
+        XCTAssertFalse(renderer.isScrubPoint(CGPoint(x: model.layout.court.midX, y: 15)))
+        renderer.update(model: makeModel(page: .world))
+        XCTAssertFalse(renderer.isCourtVisible)
+        XCTAssertNil(renderer.handleSwing(translationX: 60, velocityX: 900))
+        XCTAssertEqual(swings.count, 2)
     }
 }

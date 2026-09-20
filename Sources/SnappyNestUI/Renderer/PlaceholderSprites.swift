@@ -1,5 +1,6 @@
 import AppKit
 import CoreGraphics
+import SnappyNestCore
 
 /// Procedurally rendered scenery: the sun, the moon, and the ground props.
 /// Cells are drawn in flipped (y-down) coordinates like the pet.
@@ -7,6 +8,7 @@ public enum PlaceholderSprites {
     public static let sunSize = CGSize(width: 18, height: 18)
     public static let moonSize = CGSize(width: 16, height: 16)
     public static let propSize = CGSize(width: 14, height: 14)
+    public static let ballSize = CGSize(width: 6, height: 6)
 
     private static var cache: [String: CGImage] = [:]
 
@@ -48,6 +50,34 @@ public enum PlaceholderSprites {
         cached("prop:\(prop)@\(scale)") {
             PetSprites.render(size: propSize, scale: scale) { ctx in
                 drawProp(ctx: ctx, prop: prop)
+            }
+        }
+    }
+
+    /// The tennis ball: 6 points of optic yellow with a white seam.
+    public static func ballImage(scale: CGFloat) -> CGImage {
+        cached("ball@\(scale)") {
+            PetSprites.render(size: ballSize, scale: scale) { ctx in
+                ctx.setShouldAntialias(true)
+                ctx.setFillColor(CGColor(red: 0.55, green: 0.62, blue: 0.10, alpha: 1))
+                ctx.fillEllipse(in: CGRect(x: 0, y: 0, width: 6, height: 6))
+                ctx.setFillColor(CGColor(red: 0.86, green: 0.95, blue: 0.25, alpha: 1))
+                ctx.fillEllipse(in: CGRect(x: 0.75, y: 0.75, width: 4.5, height: 4.5))
+                ctx.setStrokeColor(CGColor(gray: 1, alpha: 0.85))
+                ctx.setLineWidth(0.6)
+                ctx.strokeEllipse(in: CGRect(x: -1, y: 1.5, width: 5, height: 3))
+            }
+        }
+    }
+
+    /// A 12×3 shadow under the ball; the renderer scales it with height.
+    public static let ballShadowSize = CGSize(width: 8, height: 3)
+    public static func ballShadowImage(scale: CGFloat) -> CGImage {
+        cached("ball-shadow@\(scale)") {
+            PetSprites.render(size: ballShadowSize, scale: scale) { ctx in
+                ctx.setShouldAntialias(true)
+                ctx.setFillColor(CGColor(gray: 0, alpha: 0.35))
+                ctx.fillEllipse(in: CGRect(origin: .zero, size: ballShadowSize))
             }
         }
     }
@@ -110,6 +140,34 @@ public enum PlaceholderSprites {
             ctx.setFillColor(CGColor(red: 0.42, green: 0.75, blue: 0.38, alpha: 1))
             ctx.fill(CGRect(x: 2, y: 6, width: 1, height: 2))
             ctx.fill(CGRect(x: 4, y: 5, width: 1, height: 3))
+        case "courtGate":
+            // A racket leaning against a post with a tennis ball at its foot.
+            ctx.setFillColor(outline)
+            ctx.fill(CGRect(x: 10, y: 2, width: 2, height: 12))
+            ctx.setShouldAntialias(true)
+            // Racket head (oval with strings) and handle, tilted onto the post.
+            ctx.setFillColor(outline)
+            ctx.fillEllipse(in: CGRect(x: 1, y: 1, width: 8, height: 9))
+            ctx.setFillColor(CGColor(red: 0.85, green: 0.80, blue: 0.62, alpha: 1))
+            ctx.fillEllipse(in: CGRect(x: 2, y: 2, width: 6, height: 7))
+            ctx.setFillColor(outline.copy(alpha: 0.5) ?? outline)
+            ctx.fill(CGRect(x: 4, y: 2, width: 0.5, height: 7))
+            ctx.fill(CGRect(x: 6, y: 2, width: 0.5, height: 7))
+            ctx.fill(CGRect(x: 2, y: 4, width: 6, height: 0.5))
+            ctx.fill(CGRect(x: 2, y: 6.5, width: 6, height: 0.5))
+            ctx.setFillColor(outline)
+            ctx.beginPath()
+            ctx.move(to: CGPoint(x: 5, y: 9))
+            ctx.addLine(to: CGPoint(x: 7, y: 9))
+            ctx.addLine(to: CGPoint(x: 9, y: 14))
+            ctx.addLine(to: CGPoint(x: 7, y: 14))
+            ctx.closePath()
+            ctx.fillPath()
+            // Ball at the foot.
+            ctx.setFillColor(CGColor(red: 0.55, green: 0.62, blue: 0.10, alpha: 1))
+            ctx.fillEllipse(in: CGRect(x: 0, y: 9, width: 5, height: 5))
+            ctx.setFillColor(CGColor(red: 0.86, green: 0.95, blue: 0.25, alpha: 1))
+            ctx.fillEllipse(in: CGRect(x: 0.75, y: 9.75, width: 3.5, height: 3.5))
         default:
             ctx.setFillColor(outline)
             ctx.fill(CGRect(x: 3, y: 6, width: 8, height: 8))

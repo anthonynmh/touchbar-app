@@ -34,11 +34,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var controlsLastTouchedAt: Date?
     /// The controls page slides back to the world after this much idle time.
     private let controlsIdleTimeout: TimeInterval = 10
+    /// The court returns to the world after this long without a swing while
+    /// nothing is in play.
+    private let courtIdleTimeout: TimeInterval = 45
+    private var courtLastSwingAt: Date?
 
     private enum MediaChoice: String { case auto, spotify, browser }
     private var mediaChoice: MediaChoice = .auto
     private static let mediaChoiceKey = "mediaSource"
     private static let petSpeciesKey = "petSpecies"
+    private static let tennisWinsKey = "tennisWins"
+    private static let tennisLossesKey = "tennisLosses"
     /// The source `currentMedia()` last picked in auto mode; `activeSource()`
     /// follows it so commands go to the player the pet is showing, and the
     /// arbiter keeps it on ties.
@@ -77,6 +83,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         composer = SceneComposer(layout: layout)
         pet = PetController(seed: seed, layout: layout.with(page: .world))
         pet.setSpeciesImmediately(species)
+        pet.tennisWins = defaults.integer(forKey: Self.tennisWinsKey)
+        pet.tennisLosses = defaults.integer(forKey: Self.tennisLossesKey)
+        pet.onMatchOver = { [weak self] winner in
+            guard let self else { return }
+            defaults.set(self.pet.tennisWins, forKey: Self.tennisWinsKey)
+            defaults.set(self.pet.tennisLosses, forKey: Self.tennisLossesKey)
+            NSLog("[SnappyNest] tennis match over: %@ wins (W%d L%d)",
+                  winner == .user ? "user" : "pet", self.pet.tennisWins, self.pet.tennisLosses)
+        }
 
         // Renderer + presenter
         renderer = SceneRenderer(frame: touchBarBounds)
@@ -116,6 +131,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         renderer.onGroundTap = { [weak self] x in
             guard let self else { return }
             self.pet.walkTo(x: x, now: self.clock.now)
+            self.renderOnce()
+        }
+        renderer.onEnterCourt = { [weak self] in self?.setPage(.court) }
+        renderer.onExitCourt  = { [weak self] in self?.setPage(.world) }
+        renderer.onSwing = { [weak self] strength in
+            guard let self else { return }
+            self.courtLastSwingAt = self.clock.now
+            let hit = self.pet.swing(strength: strength, now: self.clock.now)
+            NSLog("[SnappyNest] swing strength=%.2f %@", strength, hit ? "hit" : "ignored")
             self.renderOnce()
         }
 
@@ -202,8 +226,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         spriteTimer?.invalidate()
         spriteTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 8.0, repeats: true) { [weak self] _ in
-            self?.pet.advanceFrame()
-            self?.renderOnce()
+            guard let self else { return }
+            self.pet.advanceFrame()
+            // A ball in flight needs more than the 4 Hz tick; movement is
+            // dt-based so the extra ticks are safe.
+            if self.page == .court {
+                self.pet.tick(now: self.clock.now, media: self.currentMedia())
+            }
+            self.renderOnce()
         }
     }
 
@@ -213,6 +243,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         pet.tick(now: now, media: media)
         if page == .controls, let touched = controlsLastTouchedAt,
            now.timeIntervalSince(touched) > controlsIdleTimeout {
+            setPage(.world)
+        }
+        if page == .court, let last = courtLastSwingAt, now.timeIntervalSince(last) > courtIdleTimeout,
+           let game = pet.tennis, game.phase == .serve || game.isMatchOver {
             setPage(.world)
         }
         renderOnce()
@@ -226,6 +260,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard newPage != page else { return }
         page = newPage
         controlsLastTouchedAt = newPage == .controls ? clock.now : nil
+        courtLastSwingAt = newPage == .court ? clock.now : nil
         composer = SceneComposer(layout: composer.layout.with(page: newPage))
         pet.enter(Self.petMode(for: newPage), now: clock.now)
         NSLog("[SnappyNest] page=%@", String(describing: newPage))
@@ -237,6 +272,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .playback: return .playback
         case .world:    return .roam
         case .controls: return .workshop
+        case .court:    return .tennis
         }
     }
 
@@ -266,7 +302,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             battery: battery.snapshot,
             brightness: (bright, brightAvail),
             volume: (vol, volMuted, volAvail),
-            media: media
+            media: media,
+            tennis: pet.tennis,
+            tennisTally: (pet.tennisWins, pet.tennisLosses)
         )
         renderer.update(model: model)
         preview?.update(model: model)
