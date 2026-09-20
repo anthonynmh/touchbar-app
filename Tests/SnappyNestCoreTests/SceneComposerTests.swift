@@ -136,50 +136,40 @@ final class SceneComposerTests: XCTestCase {
         XCTAssertEqual(model.celestial.body, .moon)
     }
 
-    func testActivityZoneAndBallRestInTheNook() {
+    func testCourtGateZoneAndTennisOnlyOnTheCourtPage() {
         let layout = LayoutEngine(bounds: bounds, backingScale: 2.0)
         let middle = layout.regions.middle
-        let nookX = SceneLayout.nookX(inside: middle)
-        XCTAssertEqual(nookX, middle.minX + middle.width * 0.31, accuracy: 1e-9)
+        let gateX = SceneLayout.courtGateX(inside: middle)
+        XCTAssertEqual(gateX, middle.minX + middle.width * 0.31, accuracy: 1e-9)
         let zone = SceneLayout.activityZone(inside: middle)
-        XCTAssertEqual(zone.midX, nookX, accuracy: 1e-9)
+        XCTAssertEqual(zone.midX, gateX, accuracy: 1e-9)
         XCTAssertEqual(zone.maxY, middle.maxY - 4 + SceneLayout.activityZoneSlop, accuracy: 1e-9)
         XCTAssertEqual(zone.width, SceneLayout.propSize.width + 2 * SceneLayout.activityZoneSlop)
-        XCTAssertTrue(SceneLayout.defaultObjects(inside: middle).contains {
-            $0.prop == .ballNook && abs($0.position.x - nookX) < 1e-9
-        })
+        let gate = SceneLayout.defaultObjects(inside: middle).first { $0.prop == .courtGate }
+        XCTAssertEqual(gate?.position.x ?? -1, gateX, accuracy: 1e-9)
 
-        let composer = SceneComposer(layout: layout)
         let now = noonUTC()
-        let idle = composer.compose(
-            now: now, calendar: fixedCalendar(), pet: .placeholder,
-            battery: BatterySnapshot(isPresent: true, percentage: 0.8, isCharging: false),
-            brightness: (0.5, true), volume: (0.4, false, true), media: .unknown
-        )
-        XCTAssertNil(idle.game)
-        XCTAssertEqual(idle.ballX, nookX, "no game: the ball rests in the nook")
+        let battery = BatterySnapshot(isPresent: true, percentage: 0.8, isCharging: false)
+        let court = LayoutEngine(bounds: bounds, backingScale: 2.0, page: .court).regions.court
+        let game = TennisGame(court: court, groundY: bounds.maxY - 4, seed: 1)
 
-        var game = KeepAwayGame(arena: middle, nookX: nookX, now: now)
-        _ = game.tick(dt: 0.125, now: now.addingTimeInterval(1), petX: middle.maxX)
-        _ = game.tick(dt: 0.125, now: now.addingTimeInterval(1.125), petX: middle.maxX)
-        let playing = composer.compose(
-            now: now, calendar: fixedCalendar(), pet: .placeholder,
-            battery: BatterySnapshot(isPresent: true, percentage: 0.8, isCharging: false),
+        let world = SceneComposer(layout: layout).compose(
+            now: now, calendar: fixedCalendar(), pet: .placeholder, battery: battery,
             brightness: (0.5, true), volume: (0.4, false, true), media: .unknown,
-            game: game, gameBestRounds: 3
+            tennis: game, tennisTally: (2, 1)
         )
-        XCTAssertEqual(playing.game, game)
-        XCTAssertEqual(playing.ballX, game.ballX)
-        XCTAssertNotEqual(playing.ballX, nookX)
-        XCTAssertEqual(playing.gameBestRounds, 3)
+        XCTAssertNil(world.tennis, "the match belongs to the court page")
+        XCTAssertFalse(world.props.isEmpty)
 
-        // The game belongs to the world page only.
-        let controls = SceneComposer(layout: layout.with(page: .controls)).compose(
-            now: now, calendar: fixedCalendar(), pet: .placeholder,
-            battery: BatterySnapshot(isPresent: true, percentage: 0.8, isCharging: false),
+        let courtModel = SceneComposer(layout: layout.with(page: .court)).compose(
+            now: now, calendar: fixedCalendar(), pet: .placeholder, battery: battery,
             brightness: (0.5, true), volume: (0.4, false, true), media: .unknown,
-            game: game
+            tennis: game, tennisTally: (2, 1)
         )
-        XCTAssertNil(controls.game)
+        XCTAssertEqual(courtModel.tennis, game)
+        XCTAssertEqual(courtModel.tennisWins, 2)
+        XCTAssertEqual(courtModel.tennisLosses, 1)
+        XCTAssertTrue(courtModel.props.isEmpty, "no meadow props on the court")
+        XCTAssertEqual(courtModel.layout.page, .court)
     }
 }

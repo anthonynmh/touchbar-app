@@ -65,7 +65,9 @@ final class LayoutEngineTests: XCTestCase {
     }
 
     func testPageIndicesAreContiguousAroundTheWorld() {
-        XCTAssertEqual(LayoutEngine.Page.allCases.map(\.index), [-1, 0, 1])
+        XCTAssertEqual(LayoutEngine.Page.allCases.filter(\.isInSwipeRow).map(\.index), [-1, 0, 1])
+        XCTAssertEqual(LayoutEngine.Page.court.index, 0, "the court overlays the world")
+        XCTAssertFalse(LayoutEngine.Page.court.isInSwipeRow)
         XCTAssertEqual(LayoutEngine.Page(index: -1), .playback)
         XCTAssertEqual(LayoutEngine.Page(index: 0), .world)
         XCTAssertEqual(LayoutEngine.Page(index: 1), .controls)
@@ -105,5 +107,24 @@ final class LayoutEngineTests: XCTestCase {
         let snapped = engine.snap(CGPoint(x: 100.34, y: 15.19))
         XCTAssertEqual(snapped.x * 2, (snapped.x * 2).rounded(), accuracy: 1e-9)
         XCTAssertEqual(snapped.y * 2, (snapped.y * 2).rounded(), accuracy: 1e-9)
+    }
+
+    func testCourtRegions() {
+        let engine = LayoutEngine(bounds: CGRect(x: 0, y: 0, width: 1004, height: 30), backingScale: 2, page: .court)
+        let r = engine.regions
+        XCTAssertEqual(r.page, .court)
+        XCTAssertEqual(r.exitSign, CGRect(x: 8, y: 0, width: 34, height: 30))
+        XCTAssertEqual(r.court.minX, r.exitSign.maxX + LayoutEngine.courtGap)
+        XCTAssertEqual(r.court.maxX, 1004 - LayoutEngine.courtInset)
+        XCTAssertEqual(r.net.midX, r.court.midX, accuracy: 1e-9)
+        XCTAssertEqual(r.net.maxY, 26, "the net stands on the ground line")
+        XCTAssertEqual(r.net.height, TennisGame.netHeight)
+        XCTAssertEqual(r.scoreboard.midX, r.court.midX, accuracy: 1e-9)
+        XCTAssertTrue(r.middle.isNull)
+        XCTAssertTrue(r.trail.isNull)
+        XCTAssertTrue(r.brightness.isNull)
+        // And no court on the other pages.
+        XCTAssertTrue(engine.with(page: .world).regions.court.isNull)
+        XCTAssertTrue(engine.with(page: .world).regions.exitSign.isNull)
     }
 }

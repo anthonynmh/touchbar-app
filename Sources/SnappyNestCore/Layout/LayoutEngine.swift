@@ -11,14 +11,19 @@ import Foundation
 ///
 ///     [ playback ]  [ world ]  [ controls ]
 ///
-/// Dragging the scene horizontally pans between them. Each page uses the
-/// full strip; regions that do not exist on the current page are
-/// `CGRect.null`, which contains no point.
+/// Dragging the scene horizontally pans between them. The tennis **court**
+/// is a fourth page that is not in the row: it overlays the world (camera
+/// offset 0) and is entered by tapping the court gate prop, never by
+/// swiping. Each page uses the full strip; regions that do not exist on the
+/// current page are `CGRect.null`, which contains no point.
 public struct LayoutEngine: Equatable {
     public enum Page: Equatable, CaseIterable {
         case playback
         case world
         case controls
+        /// The tennis scene. Shares the world's camera offset; listed last
+        /// so `Page(index: 0)` stays `.world`.
+        case court
 
         /// Position in the row of pages; the camera offset is `index × width`.
         public var index: Int {
@@ -26,8 +31,12 @@ public struct LayoutEngine: Equatable {
             case .playback: return -1
             case .world:    return 0
             case .controls: return 1
+            case .court:    return 0
             }
         }
+
+        /// True for the pages the camera can be dragged between.
+        public var isInSwipeRow: Bool { self != .court }
 
         public init?(index: Int) {
             guard let page = Page.allCases.first(where: { $0.index == index }) else { return nil }
@@ -52,6 +61,11 @@ public struct LayoutEngine: Equatable {
         public let previous: CGRect     // signposts, left to right
         public let playPause: CGRect
         public let next: CGRect
+        // Court page.
+        public let exitSign: CGRect     // wooden EXIT sign at the left edge
+        public let court: CGRect        // playable ground between the baselines
+        public let net: CGRect          // the net, centred on the court
+        public let scoreboard: CGRect   // pill above the net
     }
 
     /// The controls page is a compact cluster centered on the strip so the
@@ -70,6 +84,14 @@ public struct LayoutEngine: Equatable {
     public static let signWidth: CGFloat = 34
     public static let signGap: CGFloat = 6
     public static let playbackInset: CGFloat = 8
+
+    /// Court page: the exit sign sits at the left edge, the court fills the
+    /// rest with a small run-off at both ends.
+    public static let courtInset: CGFloat = 8
+    public static let exitSignWidth: CGFloat = 34
+    public static let courtGap: CGFloat = 10
+    public static let netWidth: CGFloat = 6
+    public static let scoreboardWidth: CGFloat = 120
 
     public let bounds: CGRect
     public let backingScale: CGFloat
@@ -99,7 +121,8 @@ public struct LayoutEngine: Equatable {
                 page: .world, full: bounds, sky: bounds, middle: bounds,
                 right: .null, brightness: .null, volume: .null, battery: .null,
                 titleBanner: .null, trail: .null, elapsedLabel: .null, durationLabel: .null,
-                previous: .null, playPause: .null, next: .null
+                previous: .null, playPause: .null, next: .null,
+                exitSign: .null, court: .null, net: .null, scoreboard: .null
             )
         case .controls:
             let gap = LayoutEngine.controlGap
@@ -116,7 +139,8 @@ public struct LayoutEngine: Equatable {
                 page: .controls, full: bounds, sky: bounds, middle: .null,
                 right: right, brightness: brightness, volume: volume, battery: battery,
                 titleBanner: .null, trail: .null, elapsedLabel: .null, durationLabel: .null,
-                previous: .null, playPause: .null, next: .null
+                previous: .null, playPause: .null, next: .null,
+                exitSign: .null, court: .null, net: .null, scoreboard: .null
             )
         case .playback:
             let inset = LayoutEngine.playbackInset
@@ -138,7 +162,26 @@ public struct LayoutEngine: Equatable {
                 page: .playback, full: bounds, sky: bounds, middle: .null,
                 right: .null, brightness: .null, volume: .null, battery: .null,
                 titleBanner: titleBanner, trail: trail, elapsedLabel: elapsedLabel, durationLabel: durationLabel,
-                previous: previous, playPause: playPause, next: next
+                previous: previous, playPause: playPause, next: next,
+                exitSign: .null, court: .null, net: .null, scoreboard: .null
+            )
+        case .court:
+            let exitSign = CGRect(x: x + LayoutEngine.courtInset, y: y, width: LayoutEngine.exitSignWidth, height: h)
+            let courtStart = exitSign.maxX + LayoutEngine.courtGap
+            let court = CGRect(x: courtStart, y: y,
+                               width: max(LayoutEngine.minimumControlWidth, x + w - LayoutEngine.courtInset - courtStart),
+                               height: h)
+            let groundY = y + h - 4
+            let net = CGRect(x: court.midX - LayoutEngine.netWidth / 2, y: groundY - TennisGame.netHeight,
+                             width: LayoutEngine.netWidth, height: TennisGame.netHeight)
+            let scoreboard = CGRect(x: court.midX - LayoutEngine.scoreboardWidth / 2, y: y,
+                                    width: LayoutEngine.scoreboardWidth, height: 16)
+            return Regions(
+                page: .court, full: bounds, sky: bounds, middle: .null,
+                right: .null, brightness: .null, volume: .null, battery: .null,
+                titleBanner: .null, trail: .null, elapsedLabel: .null, durationLabel: .null,
+                previous: .null, playPause: .null, next: .null,
+                exitSign: exitSign, court: court, net: net, scoreboard: scoreboard
             )
         }
     }

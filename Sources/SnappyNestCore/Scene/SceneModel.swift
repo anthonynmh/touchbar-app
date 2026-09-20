@@ -21,12 +21,11 @@ public struct SceneModel: Equatable {
     public let media: MediaSnapshot
     public let progressFraction: Double?
 
-    /// World page: the keep-away game in progress, if any.
-    public let game: KeepAwayGame?
-    /// Where the ball is drawn (resting in the nook when no game runs).
-    public let ballX: CGFloat
-    /// Best rounds survived, shown when the pet wins.
-    public let gameBestRounds: Int
+    /// Court page: the tennis match in progress.
+    public let tennis: TennisGame?
+    /// Matches won / lost against the pet, shown when a match ends.
+    public let tennisWins: Int
+    public let tennisLosses: Int
 
     public init(
         time: WorldTime,
@@ -39,9 +38,9 @@ public struct SceneModel: Equatable {
         volume: Double, volumeMuted: Bool, volumeAvailable: Bool,
         media: MediaSnapshot,
         progressFraction: Double?,
-        game: KeepAwayGame? = nil,
-        ballX: CGFloat? = nil,
-        gameBestRounds: Int = 0
+        tennis: TennisGame? = nil,
+        tennisWins: Int = 0,
+        tennisLosses: Int = 0
     ) {
         self.time = time
         self.celestial = celestial
@@ -56,9 +55,9 @@ public struct SceneModel: Equatable {
         self.volumeAvailable = volumeAvailable
         self.media = media
         self.progressFraction = progressFraction
-        self.game = game
-        self.ballX = ballX ?? game?.ballX ?? SceneLayout.nookX(inside: layout.full)
-        self.gameBestRounds = gameBestRounds
+        self.tennis = tennis
+        self.tennisWins = tennisWins
+        self.tennisLosses = tennisLosses
     }
 }
 
@@ -81,8 +80,8 @@ public struct SceneComposer {
         brightness: (value: Double, available: Bool),
         volume: (value: Double, muted: Bool, available: Bool),
         media: MediaSnapshot,
-        game: KeepAwayGame? = nil,
-        gameBestRounds: Int = 0
+        tennis: TennisGame? = nil,
+        tennisTally: (wins: Int, losses: Int) = (0, 0)
     ) -> SceneModel {
         let regions = layout.regions
         let time = WorldTime(from: now, in: calendar, schedule: schedule)
@@ -109,9 +108,9 @@ public struct SceneComposer {
             volume: volume.value, volumeMuted: volume.muted, volumeAvailable: volume.available,
             media: media,
             progressFraction: progress,
-            game: regions.page == .world ? game : nil,
-            ballX: game?.ballX ?? SceneLayout.nookX(inside: world),
-            gameBestRounds: gameBestRounds
+            tennis: regions.page == .court ? tennis : nil,
+            tennisWins: tennisTally.wins,
+            tennisLosses: tennisTally.losses
         )
     }
 }

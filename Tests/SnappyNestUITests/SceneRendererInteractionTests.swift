@@ -295,7 +295,7 @@ final class SceneRendererInteractionTests: XCTestCase {
     }
 
     private func makeModel(page: LayoutEngine.Page = .world, brightnessAvailable: Bool = true,
-                           media: MediaSnapshot? = nil, game: KeepAwayGame? = nil,
+                           media: MediaSnapshot? = nil, tennis: TennisGame? = nil,
                            petX: CGFloat? = nil) -> SceneModel {
         let engine = LayoutEngine(bounds: bounds, backingScale: 2, page: page)
         let layout = engine.regions
@@ -336,89 +336,77 @@ final class SceneRendererInteractionTests: XCTestCase {
             volumeAvailable: true,
             media: media,
             progressFraction: 0.5,
-            game: game
+            tennis: tennis
         )
     }
 
-    // MARK: - Keep-away
+    // MARK: - Court
 
-    /// A game that has been served with the pet far right, so the ball has
-    /// rolled left out of the nook.
-    private func servedGame(world: CGRect) -> KeepAwayGame {
-        let t0 = Date(timeIntervalSince1970: 1_700_000_000)
-        var game = KeepAwayGame(arena: world, nookX: SceneLayout.nookX(inside: world), now: t0)
-        _ = game.tick(dt: 0.125, now: t0.addingTimeInterval(1), petX: world.maxX - 20)
-        for i in 1...8 {
-            _ = game.tick(dt: 0.125, now: t0.addingTimeInterval(1 + 0.125 * Double(i)), petX: world.maxX - 20)
-        }
-        XCTAssertLessThan(game.ballX, game.nookX - 40, "well clear of the nook")
-        return game
+    private func courtGame() -> TennisGame {
+        let regions = LayoutEngine(bounds: bounds, backingScale: 2, page: .court).regions
+        return TennisGame(court: regions.court, groundY: bounds.maxY - 4, seed: 1)
     }
 
-    func testNookTapStartsAndEndsTheGameFromTheWorldPageOnly() {
+    func testCourtGateOpensTheCourtFromTheWorldPageOnly() {
         let renderer = makeRenderer()
         let model = makeModel(page: .world)
         renderer.update(model: model)
-        var zoneTaps = 0, groundTaps = 0, petTaps = 0
-        renderer.onActivityZoneTap = { zoneTaps += 1 }
+        var enters = 0, groundTaps = 0, petTaps = 0
+        renderer.onEnterCourt = { enters += 1 }
         renderer.onGroundTap = { _ in groundTaps += 1 }
         renderer.onPetTap = { petTaps += 1 }
 
         let zone = SceneLayout.activityZone(inside: model.layout.middle)
         renderer.handleTap(at: CGPoint(x: zone.midX, y: zone.midY))
-        XCTAssertEqual([zoneTaps, groundTaps], [1, 0])
-        XCTAssertFalse(renderer.isGameActive, "no game in the model yet")
+        XCTAssertEqual([enters, groundTaps], [1, 0])
+        XCTAssertFalse(renderer.isCourtVisible, "the owner decides the page")
 
-        // Just outside the zone is ordinary ground.
+        // Just outside the gate is ordinary ground.
         renderer.handleTap(at: CGPoint(x: zone.maxX + 2, y: zone.midY))
-        XCTAssertEqual([zoneTaps, groundTaps], [1, 1])
+        XCTAssertEqual([enters, groundTaps], [1, 1])
 
-        // The pet standing on the nook does not steal the exit tap.
-        let onNook = makeModel(page: .world, game: servedGame(world: model.layout.middle), petX: zone.midX)
-        renderer.update(model: onNook)
-        XCTAssertTrue(renderer.isGameActive)
+        // The pet standing on the gate does not steal the tap.
+        renderer.update(model: makeModel(page: .world, petX: zone.midX))
         renderer.handleTap(at: CGPoint(x: zone.midX, y: zone.midY))
-        XCTAssertEqual([zoneTaps, petTaps], [2, 0])
+        XCTAssertEqual([enters, petTaps], [2, 0])
 
-        // Other pages have no nook.
+        // Other pages have no gate.
         renderer.update(model: makeModel(page: .controls))
         renderer.handleTap(at: CGPoint(x: zone.midX, y: zone.midY))
-        XCTAssertEqual(zoneTaps, 2)
+        XCTAssertEqual(enters, 2)
     }
 
-    func testAnyGroundTapKicksDuringPlayAndTheNookStillExits() {
+    func testCourtExitSignAndSwing() {
         let renderer = makeRenderer()
-        let idle = makeModel(page: .world)
-        renderer.update(model: idle)
-        var kicks: [CGFloat] = []
-        var groundTaps = 0, petTaps = 0, zoneTaps = 0
-        renderer.onKick = { kicks.append($0) }
+        let model = makeModel(page: .court, tennis: courtGame(), petX: courtGame().petHomeX)
+        renderer.update(model: model)
+        XCTAssertTrue(renderer.isCourtVisible)
+        var exits = 0, groundTaps = 0
+        var swings: [Double] = []
+        renderer.onExitCourt = { exits += 1 }
         renderer.onGroundTap = { _ in groundTaps += 1 }
-        renderer.onPetTap = { petTaps += 1 }
-        renderer.onActivityZoneTap = { zoneTaps += 1 }
+        renderer.onSwing = { swings.append($0) }
 
-        // No game: ground is ground, the pet is the pet.
-        let middle = idle.layout.middle
-        renderer.handleTap(at: CGPoint(x: middle.maxX - 30, y: 20))
-        XCTAssertEqual(kicks, [])
-        XCTAssertEqual(groundTaps, 1)
+        renderer.handleTap(at: CGPoint(x: model.layout.exitSign.midX, y: 15))
+        XCTAssertEqual(exits, 1)
+        renderer.handleTap(at: CGPoint(x: model.layout.court.midX, y: 20))
+        XCTAssertEqual(groundTaps, 0, "no walk-to on the court")
 
-        let game = servedGame(world: middle)
-        let pet = makeModel(page: .world, game: game, petX: middle.maxX - 100)
-        renderer.update(model: pet)
-        let petRect = pet.pet.hitRect(spriteSize: PetSprites.cellSize)
-        let ball = game.ballRect()
-        renderer.handleTap(at: CGPoint(x: middle.maxX - 30, y: 20))    // empty ground
-        renderer.handleTap(at: CGPoint(x: petRect.midX, y: petRect.midY)) // the pet
-        renderer.handleTap(at: CGPoint(x: ball.midX, y: ball.midY))     // the ball itself
-        XCTAssertEqual(kicks, [middle.maxX - 30, petRect.midX, ball.midX],
-                       "during play every ground tap is a kick, whatever it lands on")
-        XCTAssertEqual([groundTaps, petTaps], [1, 0])
+        // A rightward swipe is a swing; its speed is the strength.
+        XCTAssertEqual(renderer.handleSwing(translationX: 60, velocityX: TennisGame.fullStrengthVelocity / 2) ?? -1,
+                       0.5, accuracy: 1e-9)
+        XCTAssertEqual(renderer.handleSwing(translationX: 200, velocityX: TennisGame.fullStrengthVelocity * 3) ?? -1,
+                       1, accuracy: 1e-9, "capped at full strength")
+        XCTAssertNil(renderer.handleSwing(translationX: -60, velocityX: -900), "a leftward swipe is nothing")
+        XCTAssertNil(renderer.handleSwing(translationX: 5, velocityX: 900), "too short to be a swing")
+        XCTAssertEqual(swings.count, 2)
 
-        // The nook still exits, and the sun still shows the clock.
-        let zone = SceneLayout.activityZone(inside: middle)
-        renderer.handleTap(at: CGPoint(x: zone.midX, y: zone.midY))
-        XCTAssertEqual(zoneTaps, 1)
-        XCTAssertEqual(kicks.count, 3)
+        // No camera drag starts on the court, and no swing off it.
+        XCTAssertFalse(renderer.isSliderPoint(CGPoint(x: model.layout.court.midX, y: 15)))
+        XCTAssertFalse(renderer.isScrubPoint(CGPoint(x: model.layout.court.midX, y: 15)))
+        renderer.update(model: makeModel(page: .world))
+        XCTAssertFalse(renderer.isCourtVisible)
+        XCTAssertNil(renderer.handleSwing(translationX: 60, velocityX: 900))
+        XCTAssertEqual(swings.count, 2)
     }
 }

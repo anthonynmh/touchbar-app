@@ -121,41 +121,41 @@ same notes. Keep all content here; do not duplicate it in `CLAUDE.md`.
 - The sprite bitmap's colour management shifts `Palette.cream` by a few
   values (0xFBE7C0 → 0xFCEBCB); pixel probes in tests must use a tolerance.
 
-## World activity findings
+## Court findings
 
-- Keep-away (`KeepAwayGame`) is taps only. The camera pan, the pet tap and
-  the ground tap are all already claimed on the world page, so the game adds
-  one tap target — the nook (`SceneLayout.activityZone`) — and, while the
-  ball is in play, turns the whole ground into the kick surface. World page
-  hit order is sun/moon → nook → (playing: any point in `middle` → kick) →
-  pet → ground; the nook outranks everything but the sun so the exit tap
-  lands even with the pet on it.
-- The first version aimed a kick by which half of the 6 pt ball was tapped;
-  users could not pinpoint a side on the Touch Bar. A kick now rolls the
-  ball toward the side of the ball the tap landed on, anywhere on the
-  ground (a tap right on the ball rolls it away from the pet). Because the
-  ball (120 pt/s) outruns the pet (≤ 45 pt/s), unlimited kicks would make a
-  loss impossible, so a rolling ball only accepts a kick once it is slower
-  than `KeepAwayGame.kickableSpeed` (≈ 3 s after a kick). The ball swaps to
-  a cream ring (`PlaceholderSprites.ballImage(ready:)`) while kickable so a
-  dead tap is understandable; a dead tap never stuns the pet.
-- The game runs inside `PetController.Mode.roam`, not as a mode of its own,
-  so the page-change teleport is unchanged; `beginTransition` ends the game
-  first. Pet and ground taps are ignored only while `game != nil` (a pet
-  tap would stun the chaser for 1.8 s). The nook tap ends the game in every
-  phase; a loss ends it by itself after `KeepAwayGame.lostHold`.
-- The 4 Hz controller tick is too coarse for a ball rolling at up to 120
-  pt/s. `AppDelegate`'s 8 Hz sprite timer also calls `pet.tick` while
-  `pet.isPlayingGame` (movement is dt-based, so the extra ticks are safe) and
-  the renderer glides `ballLayer.position.x` over `ballRollInterval` between
-  updates. `KeepAwayGame.tick` takes the pet's x *before* the pet moves, so a
-  catch is judged on where the pet stood, and the catch test runs before the
-  round timer.
-- The chase speed comes from `KeepAwayGame.petSpeed(round:)` through a
-  `speedOverride` in `PetController.advanceTowardTarget`; outside a game the
-  override is nil and the action's walk/dash speed applies as before.
+- The tennis court is a fourth `LayoutEngine.Page` (`.court`) that is **not
+  in the swipe row**: it overlays the world at camera offset 0 (`index` 0,
+  listed last so `Page(index: 0)` stays `.world`) and is only reached by
+  tapping the court-gate prop (`SceneLayout.activityZone`). The renderer's
+  `courtContainer` sits above the three page containers and below the pet;
+  `paintCourt` hides it unless the model's page is `.court`. The world's sky
+  and sun stay visible above the hedge, which is intended.
+- On the court the pan gesture **is the swing** (`PanKind.swing`): a
+  rightward pan of at least `TennisGame.minSwipeDistance` maps its end
+  velocity to strength 0…1 via `TennisGame.fullStrengthVelocity`. The camera
+  never drags on the court, so the only ways out are the EXIT sign, the
+  45 s serve idle timeout in `AppDelegate`, and a page teleport
+  (`beginTransition` drops the match). `fullStrengthVelocity` (1400 pt/s) is
+  a paper value: measure what `NSPanGestureRecognizer.velocity(in:)` reports
+  for a comfortable Touch Bar flick and retune it, `maxRange` and
+  `flightSpeed` together.
+- `TennisGame` is a pure struct: flights and bounces are functions of the
+  injected `now` (`ballPosition(at:)`), so the 8 Hz sprite timer ticks the
+  controller while the page is `.court` and the renderer glides the ball
+  layer between ticks. Faults (net / out) are decided at launch but scored
+  when the ball comes down, so the flight is still shown. The pet's return
+  is judged at landing time from its x *before* it moves that tick.
+- The rally limiter is the pet's aim: `petAimSigma(rally)` grows 14 pt per
+  hit, so a perfect user eventually wins the point on a pet error. The user
+  wins outright by landing deeper than the pet can run in the flight time
+  (`petSpeed` 90 pt/s after `petReaction` 0.25 s from `petHomeX`); from the
+  serve that is roughly strength 0.87–0.94, just inside the baseline.
+- The court image (`CourtPainter`) is cached per `SkyPainter.Key` and dims
+  with `time.daylight`; the net is painted into it (a `CAShapeLayer` net at
+  2 pt was invisible on the 7 pt surface band). The pet's feet stay on the
+  world ground line (`maxY - 4`), which is the near sideline.
 - The battery stays out of the pet: `PetControllerBatteryIndependenceTests`
-  now runs a game (start + kick) inside its simulation.
+  runs a court visit and a swing inside its simulation.
 
 ## Volume control findings
 
@@ -318,3 +318,10 @@ same notes. Keep all content here; do not duplicate it in `CLAUDE.md`.
   roll the ball toward that side; a rolling ball is only kickable once it
   slows (ring cue). 210 tests (206 + 4 snapshot writers). Hardware
   verification pending.
+- 2026-09-20 — Replaced keep-away with **tennis** on a separate court page:
+  the world prop is now a racket by a post that opens `.court`; the pet
+  teleports onto its half; rightward swipes serve and return with swipe
+  speed as strength; net / out / missed return lose the point; first to 2
+  (best of 3) with a persisted W/L tally; EXIT sign, idle timeout or a page
+  teleport leave. `CourtPainter` draws the court under the live sky. 205
+  tests (201 + 4 snapshot writers). Hardware verification pending.

@@ -177,53 +177,70 @@ final class SceneSnapshotTests: XCTestCase {
         }
     }
 
-    /// The world page with keep-away in progress: the ball rolled out of the
-    /// nook, the pet mid-chase and the round pill up; then the loss.
-    func testWriteKeepAwayScene() throws {
+    /// The court page: waiting to serve, a rally with the ball over the net,
+    /// the match decided, and the court by night.
+    func testWriteCourtScenes() throws {
         guard let dir = outputDir else { throw XCTSkip("SNAPPY_SNAPSHOT_DIR not set") }
-        let layout = LayoutEngine(bounds: bounds, backingScale: scale)
+        let layout = LayoutEngine(bounds: bounds, backingScale: scale, page: .court)
         let composer = SceneComposer(layout: layout)
         var cal = Calendar(identifier: .gregorian)
         cal.timeZone = TimeZone(identifier: "UTC")!
         let renderer = SceneRenderer(frame: bounds)
         let window = NSWindow(contentRect: bounds, styleMask: .borderless, backing: .buffered, defer: false)
         window.contentView = renderer
-        var comps = DateComponents(); comps.year = 2026; comps.month = 6; comps.day = 21; comps.hour = 15
-        let now = cal.date(from: comps)!
-        renderer.now = { now.addingTimeInterval(4) }
+        let regions = layout.regions
+        let groundY = bounds.maxY - 4
 
-        let middle = layout.regions.middle
-        var game = KeepAwayGame(arena: middle, nookX: SceneLayout.nookX(inside: middle), now: now)
-        var i = 0
-        repeat {
-            _ = game.tick(dt: 0.125, now: now.addingTimeInterval(1 + 0.125 * Double(i)), petX: middle.midX + 100)
-            i += 1
-        } while !game.isKickable && i < 100
-        XCTAssertTrue(game.isKickable, "the chase frame shows the ready ring")
-        let chasing = PetState(action: .dash, facing: .left,
-                               position: CGPoint(x: game.ballX + 70, y: middle.maxY - 4), frameIndex: 1)
-        let mid = composer.compose(
-            now: now, calendar: cal, pet: chasing,
-            battery: BatterySnapshot(isPresent: true, percentage: 0.64, isCharging: false),
-            brightness: (0.6, true), volume: (0.35, false, true), media: .unknown,
-            game: game, gameBestRounds: 2
-        )
-        renderer.update(model: mid)
-        try write(try snapshot(renderer), to: dir.appendingPathComponent("keepaway-chase.png"))
+        func at(hour: Int) -> Date {
+            var comps = DateComponents(); comps.year = 2026; comps.month = 6; comps.day = 21; comps.hour = hour
+            return cal.date(from: comps)!
+        }
+        func write(_ name: String, game: TennisGame, pet: PetState, now: Date, tally: (Int, Int) = (3, 1)) throws {
+            renderer.now = { now }
+            let model = composer.compose(
+                now: now, calendar: cal, pet: pet,
+                battery: BatterySnapshot(isPresent: true, percentage: 0.64, isCharging: false),
+                brightness: (0.6, true), volume: (0.35, false, true), media: .unknown,
+                tennis: game, tennisTally: tally
+            )
+            renderer.update(model: model)
+            try self.write(try snapshot(renderer), to: dir.appendingPathComponent(name))
+        }
 
-        var lost = game
-        let landing = lost.ballX + lost.ballVX * 0.125
-        XCTAssertEqual(lost.tick(dt: 0.125, now: now.addingTimeInterval(3), petX: landing), .caught)
-        let caught = PetState(action: .celebrate, facing: .left,
-                              position: CGPoint(x: lost.ballX + 4, y: middle.maxY - 4), frameIndex: 1)
-        let over = composer.compose(
-            now: now, calendar: cal, pet: caught,
-            battery: BatterySnapshot(isPresent: true, percentage: 0.64, isCharging: false),
-            brightness: (0.6, true), volume: (0.35, false, true), media: .unknown,
-            game: lost, gameBestRounds: 2
-        )
-        renderer.update(model: over)
-        try write(try snapshot(renderer), to: dir.appendingPathComponent("keepaway-caught.png"))
+        let noon = at(hour: 12)
+        var game = TennisGame(court: regions.court, groundY: groundY, seed: 5)
+        let waiting = PetState(action: .idle, facing: .left,
+                               position: CGPoint(x: game.petHomeX, y: groundY), frameIndex: 0)
+        try write("court-serve.png", game: game, pet: waiting, now: noon)
+
+        // Mid-flight over the net, the pet dashing for the landing spot.
+        game.swing(strength: 0.7, now: noon)
+        guard case .flight(let f) = game.phase else { return XCTFail() }
+        let midway = noon.addingTimeInterval(f.duration / 2)
+        let running = PetState(action: .dash, facing: .right,
+                               position: CGPoint(x: game.petHomeX + 40, y: groundY), frameIndex: 1)
+        try write("court-rally.png", game: game, pet: running, now: midway)
+
+        // Match decided by two out shots.
+        var over = TennisGame(court: regions.court, groundY: groundY, seed: 5)
+        var now = noon
+        for _ in 0..<2 {
+            over.swing(strength: 1, now: now)
+            var e: TennisGame.Event?
+            while e == nil || e == .userHit { now = now.addingTimeInterval(0.125); e = over.tick(now: now, petX: over.petHomeX) }
+            while !over.isMatchOver, case .point = over.phase {
+                now = now.addingTimeInterval(0.125); _ = over.tick(now: now, petX: over.petHomeX)
+            }
+        }
+        XCTAssertTrue(over.isMatchOver)
+        let gloating = PetState(action: .celebrate, facing: .left,
+                                position: CGPoint(x: over.petHomeX, y: groundY), frameIndex: 1)
+        try write("court-matchover.png", game: over, pet: gloating, now: now, tally: (3, 2))
+
+        // The same serve at night: the surface dims with the sky.
+        let night = at(hour: 22)
+        let fresh = TennisGame(court: regions.court, groundY: groundY, seed: 5)
+        try write("court-2200.png", game: fresh, pet: waiting, now: night)
     }
 
     private func snapshot(_ view: NSView) throws -> CGImage {

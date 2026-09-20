@@ -149,13 +149,15 @@ Current build (`v0.1.0-dev`), verified on this Mac on 2026-09-18:
   including preferred-stereo fallback, mute handling, confirmed readback, and
   rollback after partial write failure. Sliders show a filled track, a large
   knob, and sun/speaker icons whose arcs follow the level; mute shows a slash.
-- ✅ Keep-away on the world page: tap the stone nook and the ball rolls out;
-  the pet chases it and you tap anywhere on the ground to kick the ball
-  toward that side. A rolling ball can't be kicked again until it slows (it
-  glows when ready). Survive the 10 s round and the pet gets faster; if it
-  reaches the ball it wins and celebrates. A pill above the nook shows the round and timer, and
-  the best score persists. Tap the nook again at any time to stop; swiping to
-  another page also ends the game.
+- ✅ Tennis against the pet on its own court page: tap the racket by the post
+  on the world page and the scene switches to a hard court (hedge, fence,
+  cream lines, net, EXIT sign) with the pet poofing onto its half. Swipe
+  right to serve or return — swipe speed is the shot's strength. Too weak
+  lands in the net, too strong flies out past the far baseline, and a return
+  you never swing at rolls off your baseline; each loses the point. The pet
+  runs to the landing spot and hits back, aiming worse as the rally goes on.
+  First to 2 points wins the match (best of 3); the win/loss tally persists.
+  Tap EXIT at any time (or idle on the serve for 45 s) to return to the world.
 - ✅ `LayoutEngine.Page` models the pages; `PetController.Mode` (roam,
   playback, workshop) follows the page the camera settled on.
 - ✅ Pet state machine (17 actions) with seeded, hour-of-day-weighted

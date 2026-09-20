@@ -22,10 +22,17 @@ public final class SceneRenderer: NSView {
     private let sceneryContainer = CALayer()
     private let clockPillLayer = CALayer()
     private let clockTextLayer = CATextLayer()
-    private let ballLayer = CALayer()
-    private let gamePillLayer = CALayer()
-    private let gameTextLayer = CATextLayer()
     private let petLayer = CALayer()
+
+    // The court overlays the world; shown only while the page is `.court`.
+    private let courtContainer = CALayer()
+    private let courtLayer = CALayer()
+    private let exitSignLayer = CALayer()
+    private let exitTextLayer = CATextLayer()
+    private let ballShadowLayer = CALayer()
+    private let ballLayer = CALayer()
+    private let scorePillLayer = CALayer()
+    private let scoreTextLayer = CATextLayer()
 
     private let playbackContainer = CALayer()
     private let playbackTerrainLayer = CALayer()
@@ -58,6 +65,7 @@ public final class SceneRenderer: NSView {
     private var cachedTerrain: (key: SkyPainter.Key, image: CGImage)?
     private var cachedControlsTerrain: (key: SkyPainter.Key, image: CGImage)?
     private var cachedPlaybackTerrain: (key: SkyPainter.Key, image: CGImage)?
+    private var cachedCourt: (key: SkyPainter.Key, image: CGImage)?
     private var currentModel: SceneModel?
     /// Camera over the pages: `page.index × full.width` shows that page
     /// (`-width` playback, 0 world, `+width` controls). Dragging the scene
@@ -88,11 +96,12 @@ public final class SceneRenderer: NSView {
     public var onTogglePlayPause:  (() -> Void)?
     public var onPetTap:           (() -> Void)?
     public var onGroundTap:        ((CGFloat) -> Void)?
-    /// World page: the nook was tapped (start or leave keep-away).
-    public var onActivityZoneTap:  (() -> Void)?
-    /// World page, during keep-away: the ground was tapped at this strip
-    /// `x`; the ball is kicked toward that side.
-    public var onKick:             ((CGFloat) -> Void)?
+    /// World page: the court gate was tapped; the owner opens the court.
+    public var onEnterCourt:       (() -> Void)?
+    /// Court page: the EXIT sign was tapped.
+    public var onExitCourt:        (() -> Void)?
+    /// Court page: a rightward swipe finished with this strength (0…1).
+    public var onSwing:            ((Double) -> Void)?
     /// Playback page: a tap on the trail asks for a seek to this fraction.
     public var onSeek:             ((Double) -> Void)?
     public var onNextTrack:        (() -> Void)?
@@ -136,6 +145,7 @@ public final class SceneRenderer: NSView {
         cachedTerrain = nil
         cachedControlsTerrain = nil
         cachedPlaybackTerrain = nil
+        cachedCourt = nil
     }
 
     private func applyContentsScale(to layer: CALayer?) {
@@ -151,7 +161,11 @@ public final class SceneRenderer: NSView {
         layer?.contentsScale = backingScale
 
         let worldLayers: [CALayer] = [
-            terrainLayer, celestialLayer, sceneryContainer, ballLayer, clockPillLayer, gamePillLayer
+            terrainLayer, celestialLayer, sceneryContainer, clockPillLayer
+        ]
+        let courtLayers: [CALayer] = [
+            courtLayer, exitSignLayer, exitTextLayer,
+            ballShadowLayer, ballLayer, scorePillLayer
         ]
         let playbackLayers: [CALayer] = [
             playbackTerrainLayer, trailLayer, trailCentreLayer, trailFillLayer,
@@ -165,8 +179,8 @@ public final class SceneRenderer: NSView {
             volumeIconLayer, volumeTrackLayer, volumeFillLayer, volumeKnob,
             batteryGlyphLayer, batteryTextLayer
         ]
-        let containers = [playbackContainer, worldContainer, controlsContainer]
-        for l in [skyLayer, petLayer] + containers + worldLayers + playbackLayers + controlLayers {
+        let containers = [playbackContainer, worldContainer, controlsContainer, courtContainer]
+        for l in [skyLayer, petLayer] + containers + worldLayers + playbackLayers + controlLayers + courtLayers {
             l.contentsScale = backingScale
             l.magnificationFilter = .nearest
             l.minificationFilter = .nearest
@@ -178,12 +192,18 @@ public final class SceneRenderer: NSView {
         worldLayers.forEach { worldContainer.addSublayer($0) }
         playbackLayers.forEach { playbackContainer.addSublayer($0) }
         controlLayers.forEach { controlsContainer.addSublayer($0) }
+        courtLayers.forEach { courtContainer.addSublayer($0) }
         containers.forEach { $0.anchorPoint = .zero }
+        courtContainer.isHidden = true
 
         clockPillLayer.addSublayer(clockTextLayer)
         clockPillLayer.isHidden = true
-        gamePillLayer.addSublayer(gameTextLayer)
-        gamePillLayer.isHidden = true
+        scorePillLayer.addSublayer(scoreTextLayer)
+        exitTextLayer.string = "EXIT"
+        exitTextLayer.alignmentMode = .center
+        exitTextLayer.foregroundColor = Palette.cream
+        exitTextLayer.font = NSFont.systemFont(ofSize: 8, weight: .bold)
+        exitTextLayer.fontSize = 8
 
         // The trail: a dirt path with a worn centre line; progress fills it.
         trailLayer.strokeColor = Palette.brown.copy(alpha: 0.7)
@@ -216,7 +236,7 @@ public final class SceneRenderer: NSView {
             knob.borderColor = Palette.brown
         }
 
-        for text in [batteryTextLayer, clockTextLayer, gameTextLayer, elapsedTextLayer, durationTextLayer] {
+        for text in [batteryTextLayer, clockTextLayer, scoreTextLayer, elapsedTextLayer, durationTextLayer] {
             text.alignmentMode = .center
             text.truncationMode = .none
             text.foregroundColor = Palette.cream
@@ -228,8 +248,9 @@ public final class SceneRenderer: NSView {
         }
         clockTextLayer.font = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .semibold)
         clockTextLayer.fontSize = 10
-        gameTextLayer.font = NSFont.monospacedDigitSystemFont(ofSize: 9, weight: .semibold)
-        gameTextLayer.fontSize = 9
+        scoreTextLayer.font = NSFont.monospacedDigitSystemFont(ofSize: 9, weight: .semibold)
+        scoreTextLayer.fontSize = 9
+        exitTextLayer.contentsScale = backingScale
         // The title is prose, not digits, and long titles are cut with an ellipsis.
         titleTextLayer.alignmentMode = .center
         titleTextLayer.truncationMode = .end
@@ -238,7 +259,7 @@ public final class SceneRenderer: NSView {
         titleTextLayer.contentsScale = backingScale
         titleTextLayer.font = Self.titleFont
         titleTextLayer.fontSize = 9
-        for pill in [clockPillLayer, gamePillLayer] {
+        for pill in [clockPillLayer, scorePillLayer] {
             pill.backgroundColor = CGColor(red: 0x18/255, green: 0x14/255, blue: 0x0F/255, alpha: 0.82)
             pill.cornerRadius = 5
             pill.borderWidth = 1
@@ -271,6 +292,7 @@ public final class SceneRenderer: NSView {
         let world = LayoutEngine(bounds: full, backingScale: backingScale, page: .world).regions
         let controls = LayoutEngine(bounds: full, backingScale: backingScale, page: .controls).regions
         let playback = LayoutEngine(bounds: full, backingScale: backingScale, page: .playback).regions
+        let court = LayoutEngine(bounds: full, backingScale: backingScale, page: .court).regions
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)
@@ -279,7 +301,7 @@ public final class SceneRenderer: NSView {
         paintCelestial(pos: model.celestial)
         paintScenery(model.props, regions: world)
         paintClock(model: model, regions: world)
-        paintGame(model: model, regions: world)
+        paintCourt(model: model, regions: court)
         paintPlaybackTerrain(regions: playback, time: model.time)
         paintTrail(model: model, regions: playback)
         paintSignposts(media: model.media, regions: playback)
@@ -299,7 +321,7 @@ public final class SceneRenderer: NSView {
     /// The page the camera has settled on (or is sliding toward).
     var currentPage: LayoutEngine.Page { settledPage }
 
-    private var containers: [CALayer] { [playbackContainer, worldContainer, controlsContainer] }
+    private var containers: [CALayer] { [playbackContainer, worldContainer, controlsContainer, courtContainer] }
 
     private func offset(for page: LayoutEngine.Page, width: CGFloat) -> CGFloat {
         CGFloat(page.index) * width
@@ -323,6 +345,7 @@ public final class SceneRenderer: NSView {
         playbackContainer.position = CGPoint(x: -width - offset, y: 0)
         worldContainer.position = CGPoint(x: -offset, y: 0)
         controlsContainer.position = CGPoint(x: width - offset, y: 0)
+        courtContainer.position = CGPoint(x: -offset, y: 0)
     }
 
     private func animateCamera(to target: CGFloat, width: CGFloat) {
@@ -586,67 +609,100 @@ public final class SceneRenderer: NSView {
         petLayer.frame = CGRect(x: x, y: y, width: size.width, height: size.height)
     }
 
-    // MARK: - Keep-away
+    // MARK: - Court
 
-    /// True while a game is shown (the pill is up).
-    var isGameActive: Bool { !gamePillLayer.isHidden }
+    /// True while the court page is showing.
+    var isCourtVisible: Bool { !courtContainer.isHidden }
 
-    /// The tappable nook, in strip coordinates.
+    /// The tappable court gate on the world page, in strip coordinates.
     func activityZoneRect(_ regions: LayoutEngine.Regions) -> CGRect {
         SceneLayout.activityZone(inside: regions.middle)
     }
 
-    /// The ball is drawn on every world frame: resting in the nook, or
-    /// wherever the game rolled it. Between ticks its position is animated
-    /// so an 8 Hz update still reads as rolling.
-    private func paintGame(model: SceneModel, regions: LayoutEngine.Regions) {
+    /// How long the ball glides between two updates (the in-game tick).
+    public static let ballRollInterval: TimeInterval = 1.0 / 8.0
+
+    private func paintCourt(model: SceneModel, regions: LayoutEngine.Regions) {
+        guard model.layout.page == .court, let game = model.tennis else {
+            courtContainer.isHidden = true
+            ballLayer.removeAnimation(forKey: "roll")
+            return
+        }
+        courtContainer.isHidden = false
+        let full = regions.full
+        let groundY = full.maxY - 4
+
+        courtLayer.frame = full
+        courtLayer.magnificationFilter = .linear
+        let key = SkyPainter.Key(time: model.time, size: full.size, scale: backingScale)
+        if cachedCourt?.key != key {
+            cachedCourt = (key, CourtPainter.image(size: full.size, court: regions.court, time: model.time, scale: backingScale))
+        }
+        courtLayer.contents = cachedCourt?.image
+
+        // EXIT sign.
+        let sign = SignpostGlyphs.exitSize
+        exitSignLayer.contents = SignpostGlyphs.exitImage(scale: backingScale)
+        exitSignLayer.frame = CGRect(x: regions.exitSign.midX - sign.width / 2, y: groundY - sign.height,
+                                     width: sign.width, height: sign.height)
+        exitTextLayer.frame = CGRect(x: exitSignLayer.frame.minX, y: exitSignLayer.frame.minY + 1.5,
+                                     width: sign.width, height: 11)
+
+        // Ball and its shadow; the ball glides between ticks.
+        let (bx, height) = game.ballPosition(at: now())
         let size = PlaceholderSprites.ballSize
+        ballLayer.contents = PlaceholderSprites.ballImage(scale: backingScale)
         ballLayer.magnificationFilter = .linear
-        ballLayer.contents = PlaceholderSprites.ballImage(scale: backingScale, ready: model.game?.isKickable ?? false)
-        let groundY = regions.middle.maxY - 4
-        let frame = CGRect(x: model.ballX - size.width / 2, y: groundY - size.height + (model.game == nil ? 1 : 0),
+        let frame = CGRect(x: bx - size.width / 2, y: groundY - size.height - height,
                            width: size.width, height: size.height)
-        if let game = model.game, game.isPlaying {
-            let presented = ballLayer.presentation()?.frame ?? ballLayer.frame
-            let roll = CABasicAnimation(keyPath: "position.x")
-            roll.fromValue = presented.midX
-            roll.toValue = frame.midX
-            roll.duration = Self.ballRollInterval
-            ballLayer.add(roll, forKey: "roll")
+        if case .flight = game.phase {
+            let presented = ballLayer.presentation()?.position ?? ballLayer.position
+            let glide = CABasicAnimation(keyPath: "position")
+            glide.fromValue = NSValue(point: presented)
+            glide.toValue = NSValue(point: CGPoint(x: frame.midX, y: frame.midY))
+            glide.duration = Self.ballRollInterval
+            ballLayer.add(glide, forKey: "roll")
         } else {
             ballLayer.removeAnimation(forKey: "roll")
         }
         ballLayer.frame = frame
+        let shadow = PlaceholderSprites.ballShadowSize
+        let shrink = max(0.4, 1 - height / 30)
+        ballShadowLayer.contents = PlaceholderSprites.ballShadowImage(scale: backingScale)
+        ballShadowLayer.magnificationFilter = .linear
+        ballShadowLayer.frame = CGRect(x: bx - shadow.width * shrink / 2, y: groundY - shadow.height + 1,
+                                       width: shadow.width * shrink, height: shadow.height)
+        ballShadowLayer.opacity = Float(shrink)
 
-        guard let game = model.game else {
-            gamePillLayer.isHidden = true
-            return
-        }
+        // Scoreboard.
         let label: String
         switch game.phase {
-        case .ready:    label = "ready…"
-        case .playing:  label = "R\(game.round) · \(Int(game.timeRemaining(at: now()).rounded(.up)))s"
-        case .roundWon: label = "round won!"
-        case .lost:     label = "caught · best \(max(model.gameBestRounds, game.roundsSurvived))"
+        case .serve, .flight, .bouncing:
+            label = "You \(game.userPoints) · Pet \(game.petPoints)"
+        case .point(let winner, let reason, _):
+            switch (winner, reason) {
+            case (.pet, .net):    label = "NET"
+            case (.pet, .out):    label = "OUT"
+            case (.pet, .missed): label = "Pet +1"
+            case (.user, _):      label = "You +1"
+            }
+        case .matchOver(let winner, let until):
+            if now() < until {
+                label = winner == .user ? "You win!  W\(model.tennisWins) · L\(model.tennisLosses)"
+                                        : "Pet wins  W\(model.tennisWins) · L\(model.tennisLosses)"
+            } else {
+                label = "swipe to play again"
+            }
         }
-        gameTextLayer.string = label
+        scoreTextLayer.string = label
         let textWidth = (label as NSString).size(withAttributes: [
             .font: NSFont.monospacedDigitSystemFont(ofSize: 9, weight: .semibold)
         ]).width
         let pillSize = CGSize(width: (textWidth + 12).rounded(), height: 14)
-        let zone = activityZoneRect(regions)
-        let middle = regions.middle
-        // Above the nook, nudged inside the strip.
-        var x = zone.midX - pillSize.width / 2
-        x = min(middle.maxX - 2 - pillSize.width, max(middle.minX + 2, x))
-        let y: CGFloat = 1
-        gamePillLayer.frame = CGRect(x: x.rounded(), y: y, width: pillSize.width, height: pillSize.height)
-        gameTextLayer.frame = CGRect(x: 0, y: 1, width: pillSize.width, height: 12)
-        gamePillLayer.isHidden = false
+        let x = (regions.scoreboard.midX - pillSize.width / 2).rounded()
+        scorePillLayer.frame = CGRect(x: x, y: 1, width: pillSize.width, height: pillSize.height)
+        scoreTextLayer.frame = CGRect(x: 0, y: 1, width: pillSize.width, height: 12)
     }
-
-    /// How long the ball glides between two updates (the in-game tick).
-    public static let ballRollInterval: TimeInterval = 1.0 / 8.0
 
     // MARK: - Clock reveal
 
@@ -771,7 +827,7 @@ public final class SceneRenderer: NSView {
         handleTap(at: recognizer.location(in: self))
     }
 
-    private enum PanKind { case camera, slider, scrub }
+    private enum PanKind { case camera, slider, scrub, swing }
     private var panKind: PanKind = .camera
 
     @objc private func handlePan(_ recognizer: NSPanGestureRecognizer) {
@@ -779,29 +835,51 @@ public final class SceneRenderer: NSView {
         switch recognizer.state {
         case .began:
             // Decided once: a drag never changes from slider/scrub to pan mid-gesture.
-            if isSliderPoint(point) { panKind = .slider }
+            if currentModel?.layout.page == .court { panKind = .swing }
+            else if isSliderPoint(point) { panKind = .slider }
             else if isScrubPoint(point) { panKind = .scrub }
             else { panKind = .camera }
             switch panKind {
             case .slider: handleDrag(at: point)
             case .scrub: onScrubBegin?(); onScrubMove?(point.x)
             case .camera: beginCameraDrag()
+            case .swing: break
             }
         case .changed:
             switch panKind {
             case .slider: handleDrag(at: point)
             case .scrub: onScrubMove?(point.x)
             case .camera: moveCameraDrag(translationX: recognizer.translation(in: self).x)
+            case .swing: break
             }
-        case .ended, .cancelled, .failed:
+        case .ended:
             switch panKind {
             case .slider: break
+            case .scrub: onScrubEnd?()
+            case .camera: endCameraDrag(velocityX: recognizer.velocity(in: self).x)
+            case .swing: handleSwing(translationX: recognizer.translation(in: self).x,
+                                     velocityX: recognizer.velocity(in: self).x)
+            }
+        case .cancelled, .failed:
+            switch panKind {
+            case .slider, .swing: break
             case .scrub: onScrubEnd?()
             case .camera: endCameraDrag(velocityX: recognizer.velocity(in: self).x)
             }
         default:
             break
         }
+    }
+
+    /// Court page: a rightward swipe is a swing whose speed is the strength.
+    /// Leftward or very short swipes are not a swing.
+    @discardableResult
+    func handleSwing(translationX: CGFloat, velocityX: CGFloat) -> Double? {
+        guard currentModel?.layout.page == .court else { return nil }
+        guard translationX >= TennisGame.minSwipeDistance, velocityX > 0 else { return nil }
+        let strength = Double(min(1, max(0, velocityX / TennisGame.fullStrengthVelocity)))
+        onSwing?(strength)
+        return strength
     }
 
     /// A drag that starts on a live slider scrubs it; anywhere else pans the scene.
@@ -833,19 +911,21 @@ public final class SceneRenderer: NSView {
                 onVolumeChange?(fraction(x: point.x, in: trackRect(regions.volume)))
             }
         case .world:
-            // The nook outranks the pet so the exit tap always lands. While
-            // the ball is in play the whole ground (pet included) is the
-            // kick surface.
+            // The court gate outranks the pet so the door always opens.
             if celestialRect(model.celestial).insetBy(dx: -Self.tapSlop, dy: -Self.tapSlop).contains(point) {
                 revealClock()
             } else if activityZoneRect(regions).contains(point) {
-                onActivityZoneTap?()
-            } else if let game = model.game, game.isPlaying, regions.middle.contains(point) {
-                onKick?(point.x)
+                onEnterCourt?()
             } else if petHitRect(model.pet).contains(point) {
                 onPetTap?()
             } else if regions.middle.contains(point) {
                 onGroundTap?(point.x)
+            }
+        case .court:
+            if regions.exitSign.contains(point) {
+                onExitCourt?()
+            } else if petHitRect(model.pet).contains(point) {
+                onPetTap?()
             }
         case .playback:
             if regions.previous.contains(point) {

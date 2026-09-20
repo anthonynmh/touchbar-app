@@ -12,15 +12,16 @@ import Foundation
 /// behaviour takes over:
 /// - `.roam` (world): free-roam walks and dashes toward seeded destinations;
 ///   taps on the pet play a reaction, one tap on the ground walks there and
-///   a quick second tap sprints. Tapping the nook starts keep-away
-///   (`KeepAwayGame`): the pet chases the ball instead of roaming, and pet
-///   and ground taps are ignored until the game ends.
+///   a quick second tap sprints.
+/// - `.tennis` (court): the pet lands on its half of the court and plays
+///   `TennisGame` against the user — runs to each shot, swings, celebrates
+///   or sulks per point.
 /// - `.playback`: the pet lands on the playhead, walks the trail as media
 ///   progresses and can be scrubbed along it to seek.
 /// - `.workshop` (controls): the pet lands beside the controls, puts on a
 ///   hard hat and tinkers until it leaves (hat off first, then the poof).
 public final class PetController {
-    public enum Mode: Equatable { case roam, playback, workshop }
+    public enum Mode: Equatable { case roam, playback, workshop, tennis }
 
     public private(set) var state: PetState
     public private(set) var mode: Mode = .roam
@@ -44,15 +45,19 @@ public final class PetController {
     private var lastTapAt: Date?
     private var lastGroundTapAt: Date?
 
-    // Keep-away (world page). While set, `tickRoam` drives the chase instead
-    // of the scheduler and the pet ignores pet/ground taps.
-    public private(set) var game: KeepAwayGame?
-    /// Best rounds survived across games; the owner seeds and persists it.
-    public var bestRounds: Int = 0
-    /// Called when the pet catches the ball, with the rounds survived.
-    public var onGameLost: ((Int) -> Void)?
-    /// Ground speed used instead of the action's default (the chase ramps).
+    // Tennis (court page). Created when the pet lands on the court.
+    public private(set) var tennis: TennisGame?
+    /// Matches won / lost by the user; the owner seeds and persists them.
+    public var tennisWins: Int = 0
+    public var tennisLosses: Int = 0
+    /// Called when a match ends, with the winner.
+    public var onMatchOver: ((TennisGame.Side) -> Void)?
+    /// A clip the pet holds on the court (swing, celebrate, sulk) before it
+    /// moves again.
+    private var courtHoldUntil: Date?
+    /// Ground speed used instead of the action's default (the court run).
     private var speedOverride: CGFloat?
+    private let seed: UInt64
 
     // Playback
     private var isScrubbing = false
@@ -108,6 +113,7 @@ public final class PetController {
     ) {
         self.layout = layout
         self.spriteHalfWidth = spriteHalfWidth
+        self.seed = seed
         self.scheduler = PetActionScheduler(seed: seed)
         let middle = layout.with(page: .world).regions.middle
         let start = initial ?? PetState(
@@ -163,7 +169,9 @@ public final class PetController {
     }
 
     private func beginTransition(to newMode: Mode, now: Date) {
-        if game != nil { endGame(now: now) }
+        tennis = nil
+        courtHoldUntil = nil
+        speedOverride = nil
         reactionUntil = nil
         isScrubbing = false
         targetX = nil
@@ -222,7 +230,16 @@ public final class PetController {
             return layout.trailX(fraction: lastMedia.progressFraction(at: now) ?? 0, spriteHalfWidth: spriteHalfWidth)
         case .workshop:
             return workshopX
+        case .tennis:
+            return courtGame().petHomeX
         }
+    }
+
+    /// The court geometry for this layout, seeded so a match replays the
+    /// same pet aim in tests.
+    private func courtGame() -> TennisGame {
+        let regions = layout.with(page: .court).regions
+        return TennisGame(court: regions.court, groundY: groundY, seed: seed ^ 0x7E11_1500)
     }
 
     /// The poof-in finished: start the page's behaviour from the landing spot.
@@ -247,6 +264,11 @@ public final class PetController {
         case .workshop:
             state.action = .suitUp
             nextActionAt = now.addingTimeInterval(Self.suitDuration)
+        case .tennis:
+            tennis = courtGame()
+            state.action = .idle
+            state.facing = .left
+            nextActionAt = nil
         }
     }
 
@@ -277,14 +299,11 @@ public final class PetController {
         case .roam:     tickRoam(now: now, dt: dt)
         case .playback: tickPlayback(now: now, dt: dt, media: media)
         case .workshop: tickWorkshop(now: now, dt: dt)
+        case .tennis:   tickTennis(now: now, dt: dt)
         }
     }
 
     private func tickRoam(now: Date, dt: TimeInterval) {
-        if game != nil {
-            tickGame(now: now, dt: dt)
-            return
-        }
         if nextActionAt == nil || (nextActionAt.map { now >= $0 } ?? false) {
             let time = WorldTime(from: now)
             let decision = scheduler.decideNext(at: time)
@@ -360,113 +379,78 @@ public final class PetController {
         }
     }
 
-    // MARK: - Keep-away
+    // MARK: - Tennis
 
-    public var isPlayingGame: Bool { game != nil }
-
-    /// The user tapped the nook: start keep-away on the world page, or end
-    /// the running game whatever phase it is in.
-    public func toggleKeepAway(now: Date) {
-        if game != nil {
-            endGame(now: now)
-            return
-        }
-        guard mode == .roam, transitionUntil == nil else { return }
-        let middle = layout.with(page: .world).regions.middle
-        let nookX = SceneLayout.nookX(inside: middle)
-        game = KeepAwayGame(arena: middle, nookX: nookX, now: now)
-        reactionUntil = nil
-        targetX = nil
-        currentDecision = nil
-        nextActionAt = nil
-        face(nookX)
-        state.action = .inspect
-        state.frameIndex = 0
-    }
-
-    /// The user tapped the ground at strip `x` during a game: the ball is
-    /// kicked toward that side if it is slow enough. A landed kick stuns the
-    /// pet for the round's reaction time (it plays `.surprised`).
+    /// The user swiped on the court: hit the ball with this strength (0…1).
     @discardableResult
-    public func kickBall(atX x: CGFloat, now: Date) -> Bool {
-        guard var g = game, g.kick(atX: x, petX: state.position.x, now: now) else { return false }
-        game = g
-        targetX = nil
-        state.action = .surprised
-        state.frameIndex = 0
+    public func swing(strength: Double, now: Date) -> Bool {
+        guard mode == .tennis, transitionUntil == nil, var g = tennis else { return false }
+        guard g.swing(strength: strength, now: now) else { return false }
+        tennis = g
         return true
     }
 
-    /// Leave the game: the ball goes back to the nook (the composer draws it
-    /// there once `game` is nil) and the scheduler resumes on the next tick.
-    public func endGame(now: Date) {
-        guard game != nil else { return }
-        game = nil
-        speedOverride = nil
-        targetX = nil
-        reactionUntil = nil
-        currentDecision = nil
-        nextActionAt = nil
-        state.action = .idle
-        state.frameIndex = 0
-    }
-
-    private func tickGame(now: Date, dt: TimeInterval) {
-        guard var g = game else { return }
-        let event = g.tick(dt: dt, now: now, petX: state.position.x)
-        game = g
+    private func tickTennis(now: Date, dt: TimeInterval) {
+        guard var g = tennis else { return }
+        let event = g.tick(now: now, petX: state.position.x)
+        tennis = g
         switch event {
-        case .go:
-            speedOverride = g.petSpeed
-            state.action = .dash
-            state.frameIndex = 0
-        case .caught:
-            targetX = nil
-            state.action = .celebrate
-            state.frameIndex = 0
-            bestRounds = max(bestRounds, g.roundsSurvived)
-            onGameLost?(g.roundsSurvived)
-        case .roundWon:
-            targetX = nil
-            state.action = .surprised
-            state.frameIndex = 0
-        case .nextRound:
-            face(g.nookX)
-            state.action = .inspect
-            state.frameIndex = 0
-        case .finished:
-            endGame(now: now)
-            return
-        case nil:
+        case .petHit:
+            hold(.jump, for: Self.swingHold, now: now)
+        case .point(.pet, _):
+            hold(.celebrate, for: TennisGame.pointHold, now: now)
+        case .point(.user, _):
+            hold(.surprised, for: TennisGame.pointHold, now: now)
+        case .matchOver(let winner):
+            if winner == .user { tennisWins += 1 } else { tennisLosses += 1 }
+            hold(winner == .pet ? .celebrate : .sleep, for: TennisGame.matchHold, now: now)
+            onMatchOver?(winner)
+        case .userHit, .serveReady, nil:
             break
         }
-        guard g.isPlaying else { return }
-        guard let ballX = g.petTargetX(at: now) else {
-            // Stunned by a kick: stand still, keep the surprised face.
-            targetX = nil
-            return
-        }
-        if state.action != .dash {
-            state.action = .dash
+
+        if let until = courtHoldUntil {
+            if now < until { return }
+            courtHoldUntil = nil
+            state.action = .idle
             state.frameIndex = 0
+            targetX = nil
         }
-        setTarget(ballX, arrival: .dash, hold: 0)
-        advanceTowardTarget(dt: dt, now: now)
+
+        guard let target = g.petTarget(at: now) else { return }
+        if abs(target - state.position.x) > 1 {
+            if state.action != .dash {
+                state.action = .dash
+                state.frameIndex = 0
+            }
+            speedOverride = TennisGame.petSpeed
+            setTarget(target, arrival: .idle, hold: 0)
+            advanceTowardTarget(dt: dt, now: now)
+            if targetX == nil { state.facing = .left }
+        } else if state.action == .dash {
+            state.action = .idle
+            state.frameIndex = 0
+            state.facing = .left
+        }
     }
 
-    private func face(_ x: CGFloat) {
-        if abs(x - state.position.x) > 0.5 {
-            state.facing = x > state.position.x ? .right : .left
-        }
+    /// Play a court clip in place for `duration`.
+    private func hold(_ action: PetAction, for duration: TimeInterval, now: Date) {
+        targetX = nil
+        state.action = action
+        state.frameIndex = 0
+        courtHoldUntil = now.addingTimeInterval(duration)
     }
+
+    /// Length of the pet's swing clip on the court.
+    public static let swingHold: TimeInterval = 0.4
 
     // MARK: - Taps
 
     /// The user tapped the pet. Plays `.happy`; a second tap inside
-    /// `tapChainWindow` escalates to `.surprised`. Works in every mode
-    /// except during keep-away, where a stun would be an exploit.
+    /// `tapChainWindow` escalates to `.surprised`. Works in every mode.
     public func tapPet(now: Date) {
-        guard transitionUntil == nil, game == nil else { return }
+        guard transitionUntil == nil else { return }
         let chained = lastTapAt.map { now.timeIntervalSince($0) < Self.tapChainWindow } ?? false
         if reactionUntil == nil {
             preReactionAction = state.action
@@ -481,7 +465,7 @@ public final class PetController {
     /// walks there and inspects the spot. A second tap within
     /// `sprintTapWindow` near the same spot upgrades the trip to a sprint.
     public func walkTo(x: CGFloat, now: Date) {
-        guard mode == .roam, transitionUntil == nil, game == nil else { return }
+        guard mode == .roam, transitionUntil == nil else { return }
         let middle = layout.with(page: .world).regions.middle
         let inset = max(spriteHalfWidth, 2)
         let clamped = min(middle.maxX - inset, max(middle.minX + inset, x))
