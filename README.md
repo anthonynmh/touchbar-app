@@ -106,14 +106,19 @@ Re-run any probe with `./Install/run-probe.sh 0N` after building. Probes 03 and
 
 Current build (`v0.1.0-dev`), verified on this Mac on 2026-09-18:
 
-- ✅ Live sky keyed to the wall clock: vertical zenith→horizon gradient
-  interpolated between hourly keyframes, stars that fade with daylight, a warm
+- ✅ Live sky keyed to the day's real sunrise and sunset: vertical
+  zenith→horizon gradient interpolated between keyframes anchored to
+  sunrise, noon and sunset, stars that fade with daylight, a warm
   horizon glow at dawn/dusk, hills and grass across the middle region, and
   translucent panels behind the battery and controls (`SkyPainter`, cached per
   minute).
-- ✅ Sun rises at the left of the middle region at 06:00, peaks at noon, sets
-  at the right at 18:00; the moon does the same overnight. Tapping either
-  reveals a localized clock for three seconds.
+- ✅ Sun rises at the left of the middle region at local sunrise, peaks at
+  solar noon, sets at the right at sunset; the moon does the same overnight.
+  Sunrise/sunset come from the system time zone's reference city
+  (`/usr/share/zoneinfo/zone.tab`) and a NOAA formula — no location
+  permission, no network — and fall back to a stylized 06:00 / 18:00 day for
+  fixed-offset zones such as `GMT+8`. Tapping either body reveals a
+  localized clock for three seconds.
 - ✅ Procedural cat-like pet (`PetSprites`, 24-point cell) with a pose and
   expression for every action, real walking/dashing between seeded
   destinations, a happy/surprised reaction when tapped, walk-to-tap on the
@@ -365,7 +370,10 @@ simulation panel for clock / battery / playback. All state will persist to
 - No microphone / audio recording.
 - No network code (the current app is not App-Sandboxed).
 - No sleep prevention, no SIP disabling, no privileged helpers, no input simulation.
-- No astronomical sunrise/sunset — sun/moon uses a fixed stylized 06:00 / 18:00.
+- No location services — sunrise/sunset are computed for the time zone's
+  reference city, so they are only as accurate as your distance from it
+  (exact for small zones like Singapore, tens of minutes off at the edges of
+  wide zones like `America/Chicago`).
 - No Music.app adapter in the first release. First-release media sources are Spotify
   and the browser (via MediaRemote).
 - No weather, no ChatGPT, no cloud accounts.
