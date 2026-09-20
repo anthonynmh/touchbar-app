@@ -177,6 +177,52 @@ final class SceneSnapshotTests: XCTestCase {
         }
     }
 
+    /// The world page with keep-away in progress: the ball rolled out of the
+    /// nook, the pet mid-chase and the round pill up; then the loss.
+    func testWriteKeepAwayScene() throws {
+        guard let dir = outputDir else { throw XCTSkip("SNAPPY_SNAPSHOT_DIR not set") }
+        let layout = LayoutEngine(bounds: bounds, backingScale: scale)
+        let composer = SceneComposer(layout: layout)
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "UTC")!
+        let renderer = SceneRenderer(frame: bounds)
+        let window = NSWindow(contentRect: bounds, styleMask: .borderless, backing: .buffered, defer: false)
+        window.contentView = renderer
+        var comps = DateComponents(); comps.year = 2026; comps.month = 6; comps.day = 21; comps.hour = 15
+        let now = cal.date(from: comps)!
+        renderer.now = { now.addingTimeInterval(4) }
+
+        let middle = layout.regions.middle
+        var game = KeepAwayGame(arena: middle, nookX: SceneLayout.nookX(inside: middle), now: now)
+        for i in 0...10 {
+            _ = game.tick(dt: 0.125, now: now.addingTimeInterval(1 + 0.125 * Double(i)), petX: middle.midX + 100)
+        }
+        let chasing = PetState(action: .dash, facing: .left,
+                               position: CGPoint(x: game.ballX + 70, y: middle.maxY - 4), frameIndex: 1)
+        let mid = composer.compose(
+            now: now, calendar: cal, pet: chasing,
+            battery: BatterySnapshot(isPresent: true, percentage: 0.64, isCharging: false),
+            brightness: (0.6, true), volume: (0.35, false, true), media: .unknown,
+            game: game, gameBestRounds: 2
+        )
+        renderer.update(model: mid)
+        try write(try snapshot(renderer), to: dir.appendingPathComponent("keepaway-chase.png"))
+
+        var lost = game
+        let landing = lost.ballX + lost.ballVX * 0.125
+        XCTAssertEqual(lost.tick(dt: 0.125, now: now.addingTimeInterval(3), petX: landing), .caught)
+        let caught = PetState(action: .celebrate, facing: .left,
+                              position: CGPoint(x: lost.ballX + 4, y: middle.maxY - 4), frameIndex: 1)
+        let over = composer.compose(
+            now: now, calendar: cal, pet: caught,
+            battery: BatterySnapshot(isPresent: true, percentage: 0.64, isCharging: false),
+            brightness: (0.6, true), volume: (0.35, false, true), media: .unknown,
+            game: lost, gameBestRounds: 2
+        )
+        renderer.update(model: over)
+        try write(try snapshot(renderer), to: dir.appendingPathComponent("keepaway-caught.png"))
+    }
+
     private func snapshot(_ view: NSView) throws -> CGImage {
         let w = Int(bounds.width * scale), h = Int(bounds.height * scale)
         let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 4 * w,

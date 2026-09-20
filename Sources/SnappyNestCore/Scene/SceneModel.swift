@@ -21,6 +21,13 @@ public struct SceneModel: Equatable {
     public let media: MediaSnapshot
     public let progressFraction: Double?
 
+    /// World page: the keep-away game in progress, if any.
+    public let game: KeepAwayGame?
+    /// Where the ball is drawn (resting in the nook when no game runs).
+    public let ballX: CGFloat
+    /// Best rounds survived, shown when the pet wins.
+    public let gameBestRounds: Int
+
     public init(
         time: WorldTime,
         celestial: CelestialPosition,
@@ -31,7 +38,10 @@ public struct SceneModel: Equatable {
         brightness: Double, brightnessAvailable: Bool,
         volume: Double, volumeMuted: Bool, volumeAvailable: Bool,
         media: MediaSnapshot,
-        progressFraction: Double?
+        progressFraction: Double?,
+        game: KeepAwayGame? = nil,
+        ballX: CGFloat? = nil,
+        gameBestRounds: Int = 0
     ) {
         self.time = time
         self.celestial = celestial
@@ -46,6 +56,9 @@ public struct SceneModel: Equatable {
         self.volumeAvailable = volumeAvailable
         self.media = media
         self.progressFraction = progressFraction
+        self.game = game
+        self.ballX = ballX ?? game?.ballX ?? SceneLayout.nookX(inside: layout.full)
+        self.gameBestRounds = gameBestRounds
     }
 }
 
@@ -67,7 +80,9 @@ public struct SceneComposer {
         battery: BatterySnapshot,
         brightness: (value: Double, available: Bool),
         volume: (value: Double, muted: Bool, available: Bool),
-        media: MediaSnapshot
+        media: MediaSnapshot,
+        game: KeepAwayGame? = nil,
+        gameBestRounds: Int = 0
     ) -> SceneModel {
         let regions = layout.regions
         let time = WorldTime(from: now, in: calendar, schedule: schedule)
@@ -93,7 +108,10 @@ public struct SceneComposer {
             brightness: brightness.value, brightnessAvailable: brightness.available,
             volume: volume.value, volumeMuted: volume.muted, volumeAvailable: volume.available,
             media: media,
-            progressFraction: progress
+            progressFraction: progress,
+            game: regions.page == .world ? game : nil,
+            ballX: game?.ballX ?? SceneLayout.nookX(inside: world),
+            gameBestRounds: gameBestRounds
         )
     }
 }

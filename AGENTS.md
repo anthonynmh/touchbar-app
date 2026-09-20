@@ -121,6 +121,33 @@ same notes. Keep all content here; do not duplicate it in `CLAUDE.md`.
 - The sprite bitmap's colour management shifts `Palette.cream` by a few
   values (0xFBE7C0 → 0xFCEBCB); pixel probes in tests must use a tolerance.
 
+## World activity findings
+
+- Keep-away (`KeepAwayGame`) is taps only. The camera pan, the pet tap and
+  the ground tap are all already claimed on the world page, so the game adds
+  two tap targets — the nook (`SceneLayout.activityZone`) and the ball
+  (`KeepAwayGame.ballHitRect`, inflated by 8 pt) — and nothing else. World
+  page hit order is sun/moon → ball (only while playing) → nook → pet →
+  ground: the ball outranks the pet because they overlap at the catch, and
+  the nook outranks the pet so the exit tap lands even with the pet on it.
+- The game runs inside `PetController.Mode.roam`, not as a mode of its own,
+  so the page-change teleport is unchanged; `beginTransition` ends the game
+  first. Pet and ground taps are ignored only while `game != nil` (a pet
+  tap would stun the chaser for 1.8 s). The nook tap ends the game in every
+  phase; a loss ends it by itself after `KeepAwayGame.lostHold`.
+- The 4 Hz controller tick is too coarse for a ball rolling at up to 120
+  pt/s. `AppDelegate`'s 8 Hz sprite timer also calls `pet.tick` while
+  `pet.isPlayingGame` (movement is dt-based, so the extra ticks are safe) and
+  the renderer glides `ballLayer.position.x` over `ballRollInterval` between
+  updates. `KeepAwayGame.tick` takes the pet's x *before* the pet moves, so a
+  catch is judged on where the pet stood, and the catch test runs before the
+  round timer.
+- The chase speed comes from `KeepAwayGame.petSpeed(round:)` through a
+  `speedOverride` in `PetController.advanceTowardTarget`; outside a game the
+  override is nil and the action's walk/dash speed applies as before.
+- The battery stays out of the pet: `PetControllerBatteryIndependenceTests`
+  now runs a game (start + kick) inside its simulation.
+
 ## Volume control findings
 
 - Brightness and volume share the same renderer gesture routing; brightness
@@ -268,3 +295,13 @@ same notes. Keep all content here; do not duplicate it in `CLAUDE.md`.
   06:00 / 18:00 day as the default and fallback. The app logs
   `[SnappyNest] solar tz=… coords=… sunrise=… sunset=…` at launch for
   readback. 184 tests (181 + 3 snapshot writers). Hardware verification pending.
+- 2026-09-20 — `feat/keep-away-zone`: added the world page's first activity
+  zone. A stone nook at 31% of the ground holds a ball; tapping it starts
+  keep-away (`KeepAwayGame`, pure state machine): the ball is served away
+  from the pet, the pet chases at a per-round speed, taps on the ball kick
+  it away from the finger and stun the pet for the round's reaction time,
+  surviving 10 s wins the round, the pet reaching the ball wins the game.
+  Best rounds persist in `UserDefaults` (`keepAwayBestRounds`). Confirmed
+  battery was already decoupled from the pet (no controller/scheduler
+  input; acceptance test extended to cover a game). 209 tests (205 + 4
+  snapshot writers). Hardware verification pending.

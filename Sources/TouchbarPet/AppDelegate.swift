@@ -39,6 +39,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var mediaChoice: MediaChoice = .auto
     private static let mediaChoiceKey = "mediaSource"
     private static let petSpeciesKey = "petSpecies"
+    private static let keepAwayBestKey = "keepAwayBestRounds"
     /// The source `currentMedia()` last picked in auto mode; `activeSource()`
     /// follows it so commands go to the player the pet is showing, and the
     /// arbiter keeps it on ties.
@@ -77,6 +78,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         composer = SceneComposer(layout: layout)
         pet = PetController(seed: seed, layout: layout.with(page: .world))
         pet.setSpeciesImmediately(species)
+        pet.bestRounds = defaults.integer(forKey: Self.keepAwayBestKey)
+        pet.onGameLost = { [weak self] rounds in
+            guard let self else { return }
+            defaults.set(self.pet.bestRounds, forKey: Self.keepAwayBestKey)
+            NSLog("[SnappyNest] keep-away lost after %d rounds (best %d)", rounds, self.pet.bestRounds)
+        }
 
         // Renderer + presenter
         renderer = SceneRenderer(frame: touchBarBounds)
@@ -116,6 +123,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         renderer.onGroundTap = { [weak self] x in
             guard let self else { return }
             self.pet.walkTo(x: x, now: self.clock.now)
+            self.renderOnce()
+        }
+        renderer.onActivityZoneTap = { [weak self] in
+            guard let self else { return }
+            self.pet.toggleKeepAway(now: self.clock.now)
+            NSLog("[SnappyNest] keep-away %@", self.pet.isPlayingGame ? "started" : "ended")
+            self.renderOnce()
+        }
+        renderer.onBallTap = { [weak self] x in
+            guard let self else { return }
+            self.pet.kickBall(atX: x, now: self.clock.now)
             self.renderOnce()
         }
 
@@ -202,8 +220,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         spriteTimer?.invalidate()
         spriteTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 8.0, repeats: true) { [weak self] _ in
-            self?.pet.advanceFrame()
-            self?.renderOnce()
+            guard let self else { return }
+            self.pet.advanceFrame()
+            // A rolling ball needs more than the 4 Hz tick; movement is
+            // dt-based so the extra ticks are safe.
+            if self.pet.isPlayingGame {
+                self.pet.tick(now: self.clock.now, media: self.currentMedia())
+            }
+            self.renderOnce()
         }
     }
 
@@ -266,7 +290,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             battery: battery.snapshot,
             brightness: (bright, brightAvail),
             volume: (vol, volMuted, volAvail),
-            media: media
+            media: media,
+            game: pet.game,
+            gameBestRounds: pet.bestRounds
         )
         renderer.update(model: model)
         preview?.update(model: model)

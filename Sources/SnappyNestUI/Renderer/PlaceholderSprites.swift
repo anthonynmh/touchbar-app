@@ -1,5 +1,6 @@
 import AppKit
 import CoreGraphics
+import SnappyNestCore
 
 /// Procedurally rendered scenery: the sun, the moon, and the ground props.
 /// Cells are drawn in flipped (y-down) coordinates like the pet.
@@ -7,6 +8,7 @@ public enum PlaceholderSprites {
     public static let sunSize = CGSize(width: 18, height: 18)
     public static let moonSize = CGSize(width: 16, height: 16)
     public static let propSize = CGSize(width: 14, height: 14)
+    public static let ballSize = KeepAwayGame.ballSize
 
     private static var cache: [String: CGImage] = [:]
 
@@ -48,6 +50,21 @@ public enum PlaceholderSprites {
         cached("prop:\(prop)@\(scale)") {
             PetSprites.render(size: propSize, scale: scale) { ctx in
                 drawProp(ctx: ctx, prop: prop)
+            }
+        }
+    }
+
+    /// The keep-away ball: a 6-point rubber ball with a highlight.
+    public static func ballImage(scale: CGFloat) -> CGImage {
+        cached("ball@\(scale)") {
+            PetSprites.render(size: ballSize, scale: scale) { ctx in
+                ctx.setShouldAntialias(true)
+                ctx.setFillColor(Palette.brown)
+                ctx.fillEllipse(in: CGRect(x: 0, y: 0, width: 6, height: 6))
+                ctx.setFillColor(CGColor(red: 0.90, green: 0.32, blue: 0.28, alpha: 1))
+                ctx.fillEllipse(in: CGRect(x: 1, y: 1, width: 4, height: 4))
+                ctx.setFillColor(CGColor(gray: 1, alpha: 0.75))
+                ctx.fill(CGRect(x: 2, y: 1.5, width: 1, height: 1))
             }
         }
     }
@@ -110,6 +127,16 @@ public enum PlaceholderSprites {
             ctx.setFillColor(CGColor(red: 0.42, green: 0.75, blue: 0.38, alpha: 1))
             ctx.fill(CGRect(x: 2, y: 6, width: 1, height: 2))
             ctx.fill(CGRect(x: 4, y: 5, width: 1, height: 3))
+        case "ballNook":
+            // A shallow stone dish the ball rests in; the ball itself is a
+            // separate layer so it can roll away.
+            ctx.setShouldAntialias(true)
+            ctx.setFillColor(outline)
+            ctx.fillEllipse(in: CGRect(x: 0, y: 9, width: 14, height: 5))
+            ctx.setFillColor(CGColor(red: 0.55, green: 0.50, blue: 0.44, alpha: 1))
+            ctx.fillEllipse(in: CGRect(x: 1, y: 10, width: 12, height: 3))
+            ctx.setFillColor(CGColor(red: 0.30, green: 0.26, blue: 0.22, alpha: 1))
+            ctx.fillEllipse(in: CGRect(x: 3, y: 10.5, width: 8, height: 2))
         default:
             ctx.setFillColor(outline)
             ctx.fill(CGRect(x: 3, y: 6, width: 8, height: 8))

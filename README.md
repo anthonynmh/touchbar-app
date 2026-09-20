@@ -149,6 +149,12 @@ Current build (`v0.1.0-dev`), verified on this Mac on 2026-09-18:
   including preferred-stereo fallback, mute handling, confirmed readback, and
   rollback after partial write failure. Sliders show a filled track, a large
   knob, and sun/speaker icons whose arcs follow the level; mute shows a slash.
+- ✅ Keep-away on the world page: tap the stone nook and the ball rolls out;
+  the pet chases it and you tap the ball to kick it away from your finger.
+  Survive the 10 s round and the pet gets faster; if it reaches the ball it
+  wins and celebrates. A pill above the nook shows the round and timer, and
+  the best score persists. Tap the nook again at any time to stop; swiping to
+  another page also ends the game.
 - ✅ `LayoutEngine.Page` models the pages; `PetController.Mode` (roam,
   playback, workshop) follows the page the camera settled on.
 - ✅ Pet state machine (17 actions) with seeded, hour-of-day-weighted

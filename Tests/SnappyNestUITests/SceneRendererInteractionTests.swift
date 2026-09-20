@@ -295,12 +295,13 @@ final class SceneRendererInteractionTests: XCTestCase {
     }
 
     private func makeModel(page: LayoutEngine.Page = .world, brightnessAvailable: Bool = true,
-                           media: MediaSnapshot? = nil) -> SceneModel {
+                           media: MediaSnapshot? = nil, game: KeepAwayGame? = nil,
+                           petX: CGFloat? = nil) -> SceneModel {
         let engine = LayoutEngine(bounds: bounds, backingScale: 2, page: page)
         let layout = engine.regions
         let world = engine.with(page: .world).regions
         let time = WorldTime(hour: 12, minute: 0, second: 0)
-        let petX = page == .playback ? engine.trailX(fraction: 0.5, spriteHalfWidth: 12) : world.middle.minX + 80
+        let petX = petX ?? (page == .playback ? engine.trailX(fraction: 0.5, spriteHalfWidth: 12) : world.middle.minX + 80)
         let pet = PetState(action: .idle, facing: .right,
                            position: CGPoint(x: petX, y: world.middle.maxY - 4),
                            frameIndex: 0)
@@ -334,7 +335,80 @@ final class SceneRendererInteractionTests: XCTestCase {
             volumeMuted: false,
             volumeAvailable: true,
             media: media,
-            progressFraction: 0.5
+            progressFraction: 0.5,
+            game: game
         )
+    }
+
+    // MARK: - Keep-away
+
+    /// A game that has been served with the pet far right, so the ball has
+    /// rolled left out of the nook.
+    private func servedGame(world: CGRect) -> KeepAwayGame {
+        let t0 = Date(timeIntervalSince1970: 1_700_000_000)
+        var game = KeepAwayGame(arena: world, nookX: SceneLayout.nookX(inside: world), now: t0)
+        _ = game.tick(dt: 0.125, now: t0.addingTimeInterval(1), petX: world.maxX - 20)
+        for i in 1...8 {
+            _ = game.tick(dt: 0.125, now: t0.addingTimeInterval(1 + 0.125 * Double(i)), petX: world.maxX - 20)
+        }
+        XCTAssertLessThan(game.ballX, game.nookX - 40, "well clear of the nook")
+        return game
+    }
+
+    func testNookTapStartsAndEndsTheGameFromTheWorldPageOnly() {
+        let renderer = makeRenderer()
+        let model = makeModel(page: .world)
+        renderer.update(model: model)
+        var zoneTaps = 0, groundTaps = 0, petTaps = 0
+        renderer.onActivityZoneTap = { zoneTaps += 1 }
+        renderer.onGroundTap = { _ in groundTaps += 1 }
+        renderer.onPetTap = { petTaps += 1 }
+
+        let zone = SceneLayout.activityZone(inside: model.layout.middle)
+        renderer.handleTap(at: CGPoint(x: zone.midX, y: zone.midY))
+        XCTAssertEqual([zoneTaps, groundTaps], [1, 0])
+        XCTAssertFalse(renderer.isGameActive, "no game in the model yet")
+
+        // Just outside the zone is ordinary ground.
+        renderer.handleTap(at: CGPoint(x: zone.maxX + 2, y: zone.midY))
+        XCTAssertEqual([zoneTaps, groundTaps], [1, 1])
+
+        // The pet standing on the nook does not steal the exit tap.
+        let onNook = makeModel(page: .world, game: servedGame(world: model.layout.middle), petX: zone.midX)
+        renderer.update(model: onNook)
+        XCTAssertTrue(renderer.isGameActive)
+        renderer.handleTap(at: CGPoint(x: zone.midX, y: zone.midY))
+        XCTAssertEqual([zoneTaps, petTaps], [2, 0])
+
+        // Other pages have no nook.
+        renderer.update(model: makeModel(page: .controls))
+        renderer.handleTap(at: CGPoint(x: zone.midX, y: zone.midY))
+        XCTAssertEqual(zoneTaps, 2)
+    }
+
+    func testBallTapKicksOnlyDuringPlayAndOutranksThePet() {
+        let renderer = makeRenderer()
+        let idle = makeModel(page: .world)
+        renderer.update(model: idle)
+        var ballTaps: [CGFloat] = []
+        var groundTaps = 0, petTaps = 0
+        renderer.onBallTap = { ballTaps.append($0) }
+        renderer.onGroundTap = { _ in groundTaps += 1 }
+        renderer.onPetTap = { petTaps += 1 }
+
+        // The resting ball is scenery until a game runs (it sits in the
+        // nook, so that tap is the zone's; probe a point off the nook).
+        let game = servedGame(world: idle.layout.middle)
+        let ball = game.ballHitRect()
+        renderer.handleTap(at: CGPoint(x: ball.midX, y: ball.midY))
+        XCTAssertEqual(ballTaps, [])
+        XCTAssertEqual(groundTaps, 1)
+
+        renderer.update(model: makeModel(page: .world, game: game, petX: ball.midX))
+        renderer.handleTap(at: CGPoint(x: ball.minX + 1, y: ball.midY))
+        XCTAssertEqual(ballTaps, [ball.minX + 1])
+        XCTAssertEqual(petTaps, 0, "the ball outranks the pet standing on it")
+        renderer.handleTap(at: CGPoint(x: ball.maxX + 4, y: ball.midY))
+        XCTAssertEqual(petTaps, 1, "beside the ball the pet is still tappable")
     }
 }

@@ -22,6 +22,9 @@ public final class SceneRenderer: NSView {
     private let sceneryContainer = CALayer()
     private let clockPillLayer = CALayer()
     private let clockTextLayer = CATextLayer()
+    private let ballLayer = CALayer()
+    private let gamePillLayer = CALayer()
+    private let gameTextLayer = CATextLayer()
     private let petLayer = CALayer()
 
     private let playbackContainer = CALayer()
@@ -85,6 +88,10 @@ public final class SceneRenderer: NSView {
     public var onTogglePlayPause:  (() -> Void)?
     public var onPetTap:           (() -> Void)?
     public var onGroundTap:        ((CGFloat) -> Void)?
+    /// World page: the nook was tapped (start or leave keep-away).
+    public var onActivityZoneTap:  (() -> Void)?
+    /// World page, during keep-away: the ball was tapped at this strip `x`.
+    public var onBallTap:          ((CGFloat) -> Void)?
     /// Playback page: a tap on the trail asks for a seek to this fraction.
     public var onSeek:             ((Double) -> Void)?
     public var onNextTrack:        (() -> Void)?
@@ -143,7 +150,7 @@ public final class SceneRenderer: NSView {
         layer?.contentsScale = backingScale
 
         let worldLayers: [CALayer] = [
-            terrainLayer, celestialLayer, sceneryContainer, clockPillLayer
+            terrainLayer, celestialLayer, sceneryContainer, ballLayer, clockPillLayer, gamePillLayer
         ]
         let playbackLayers: [CALayer] = [
             playbackTerrainLayer, trailLayer, trailCentreLayer, trailFillLayer,
@@ -174,6 +181,8 @@ public final class SceneRenderer: NSView {
 
         clockPillLayer.addSublayer(clockTextLayer)
         clockPillLayer.isHidden = true
+        gamePillLayer.addSublayer(gameTextLayer)
+        gamePillLayer.isHidden = true
 
         // The trail: a dirt path with a worn centre line; progress fills it.
         trailLayer.strokeColor = Palette.brown.copy(alpha: 0.7)
@@ -206,7 +215,7 @@ public final class SceneRenderer: NSView {
             knob.borderColor = Palette.brown
         }
 
-        for text in [batteryTextLayer, clockTextLayer, elapsedTextLayer, durationTextLayer] {
+        for text in [batteryTextLayer, clockTextLayer, gameTextLayer, elapsedTextLayer, durationTextLayer] {
             text.alignmentMode = .center
             text.truncationMode = .none
             text.foregroundColor = Palette.cream
@@ -218,6 +227,8 @@ public final class SceneRenderer: NSView {
         }
         clockTextLayer.font = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .semibold)
         clockTextLayer.fontSize = 10
+        gameTextLayer.font = NSFont.monospacedDigitSystemFont(ofSize: 9, weight: .semibold)
+        gameTextLayer.fontSize = 9
         // The title is prose, not digits, and long titles are cut with an ellipsis.
         titleTextLayer.alignmentMode = .center
         titleTextLayer.truncationMode = .end
@@ -226,10 +237,12 @@ public final class SceneRenderer: NSView {
         titleTextLayer.contentsScale = backingScale
         titleTextLayer.font = Self.titleFont
         titleTextLayer.fontSize = 9
-        clockPillLayer.backgroundColor = CGColor(red: 0x18/255, green: 0x14/255, blue: 0x0F/255, alpha: 0.82)
-        clockPillLayer.cornerRadius = 5
-        clockPillLayer.borderWidth = 1
-        clockPillLayer.borderColor = Palette.cream.copy(alpha: 0.35)
+        for pill in [clockPillLayer, gamePillLayer] {
+            pill.backgroundColor = CGColor(red: 0x18/255, green: 0x14/255, blue: 0x0F/255, alpha: 0.82)
+            pill.cornerRadius = 5
+            pill.borderWidth = 1
+            pill.borderColor = Palette.cream.copy(alpha: 0.35)
+        }
     }
 
     private func configureInput() {
@@ -265,6 +278,7 @@ public final class SceneRenderer: NSView {
         paintCelestial(pos: model.celestial)
         paintScenery(model.props, regions: world)
         paintClock(model: model, regions: world)
+        paintGame(model: model, regions: world)
         paintPlaybackTerrain(regions: playback, time: model.time)
         paintTrail(model: model, regions: playback)
         paintSignposts(media: model.media, regions: playback)
@@ -571,6 +585,68 @@ public final class SceneRenderer: NSView {
         petLayer.frame = CGRect(x: x, y: y, width: size.width, height: size.height)
     }
 
+    // MARK: - Keep-away
+
+    /// True while a game is shown (the pill is up).
+    var isGameActive: Bool { !gamePillLayer.isHidden }
+
+    /// The tappable nook, in strip coordinates.
+    func activityZoneRect(_ regions: LayoutEngine.Regions) -> CGRect {
+        SceneLayout.activityZone(inside: regions.middle)
+    }
+
+    /// The ball is drawn on every world frame: resting in the nook, or
+    /// wherever the game rolled it. Between ticks its position is animated
+    /// so an 8 Hz update still reads as rolling.
+    private func paintGame(model: SceneModel, regions: LayoutEngine.Regions) {
+        let size = PlaceholderSprites.ballSize
+        ballLayer.magnificationFilter = .linear
+        ballLayer.contents = PlaceholderSprites.ballImage(scale: backingScale)
+        let groundY = regions.middle.maxY - 4
+        let frame = CGRect(x: model.ballX - size.width / 2, y: groundY - size.height + (model.game == nil ? 1 : 0),
+                           width: size.width, height: size.height)
+        if let game = model.game, game.isPlaying {
+            let presented = ballLayer.presentation()?.frame ?? ballLayer.frame
+            let roll = CABasicAnimation(keyPath: "position.x")
+            roll.fromValue = presented.midX
+            roll.toValue = frame.midX
+            roll.duration = Self.ballRollInterval
+            ballLayer.add(roll, forKey: "roll")
+        } else {
+            ballLayer.removeAnimation(forKey: "roll")
+        }
+        ballLayer.frame = frame
+
+        guard let game = model.game else {
+            gamePillLayer.isHidden = true
+            return
+        }
+        let label: String
+        switch game.phase {
+        case .ready:    label = "ready…"
+        case .playing:  label = "R\(game.round) · \(Int(game.timeRemaining(at: now()).rounded(.up)))s"
+        case .roundWon: label = "round won!"
+        case .lost:     label = "caught · best \(max(model.gameBestRounds, game.roundsSurvived))"
+        }
+        gameTextLayer.string = label
+        let textWidth = (label as NSString).size(withAttributes: [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: 9, weight: .semibold)
+        ]).width
+        let pillSize = CGSize(width: (textWidth + 12).rounded(), height: 14)
+        let zone = activityZoneRect(regions)
+        let middle = regions.middle
+        // Above the nook, nudged inside the strip.
+        var x = zone.midX - pillSize.width / 2
+        x = min(middle.maxX - 2 - pillSize.width, max(middle.minX + 2, x))
+        let y: CGFloat = 1
+        gamePillLayer.frame = CGRect(x: x.rounded(), y: y, width: pillSize.width, height: pillSize.height)
+        gameTextLayer.frame = CGRect(x: 0, y: 1, width: pillSize.width, height: 12)
+        gamePillLayer.isHidden = false
+    }
+
+    /// How long the ball glides between two updates (the in-game tick).
+    public static let ballRollInterval: TimeInterval = 1.0 / 8.0
+
     // MARK: - Clock reveal
 
     /// True while the tapped-sun/moon clock pill is showing.
@@ -756,8 +832,14 @@ public final class SceneRenderer: NSView {
                 onVolumeChange?(fraction(x: point.x, in: trackRect(regions.volume)))
             }
         case .world:
+            // The ball outranks the pet because the two overlap at the catch;
+            // the nook outranks the pet so the exit tap always lands.
             if celestialRect(model.celestial).insetBy(dx: -Self.tapSlop, dy: -Self.tapSlop).contains(point) {
                 revealClock()
+            } else if let game = model.game, game.isPlaying, game.ballHitRect().contains(point) {
+                onBallTap?(point.x)
+            } else if activityZoneRect(regions).contains(point) {
+                onActivityZoneTap?()
             } else if petHitRect(model.pet).contains(point) {
                 onPetTap?()
             } else if regions.middle.contains(point) {

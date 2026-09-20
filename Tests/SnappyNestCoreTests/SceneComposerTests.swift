@@ -135,4 +135,51 @@ final class SceneComposerTests: XCTestCase {
         XCTAssertEqual(model.time.schedule, late)
         XCTAssertEqual(model.celestial.body, .moon)
     }
+
+    func testActivityZoneAndBallRestInTheNook() {
+        let layout = LayoutEngine(bounds: bounds, backingScale: 2.0)
+        let middle = layout.regions.middle
+        let nookX = SceneLayout.nookX(inside: middle)
+        XCTAssertEqual(nookX, middle.minX + middle.width * 0.31, accuracy: 1e-9)
+        let zone = SceneLayout.activityZone(inside: middle)
+        XCTAssertEqual(zone.midX, nookX, accuracy: 1e-9)
+        XCTAssertEqual(zone.maxY, middle.maxY - 4 + SceneLayout.activityZoneSlop, accuracy: 1e-9)
+        XCTAssertEqual(zone.width, SceneLayout.propSize.width + 2 * SceneLayout.activityZoneSlop)
+        XCTAssertTrue(SceneLayout.defaultObjects(inside: middle).contains {
+            $0.prop == .ballNook && abs($0.position.x - nookX) < 1e-9
+        })
+
+        let composer = SceneComposer(layout: layout)
+        let now = noonUTC()
+        let idle = composer.compose(
+            now: now, calendar: fixedCalendar(), pet: .placeholder,
+            battery: BatterySnapshot(isPresent: true, percentage: 0.8, isCharging: false),
+            brightness: (0.5, true), volume: (0.4, false, true), media: .unknown
+        )
+        XCTAssertNil(idle.game)
+        XCTAssertEqual(idle.ballX, nookX, "no game: the ball rests in the nook")
+
+        var game = KeepAwayGame(arena: middle, nookX: nookX, now: now)
+        _ = game.tick(dt: 0.125, now: now.addingTimeInterval(1), petX: middle.maxX)
+        _ = game.tick(dt: 0.125, now: now.addingTimeInterval(1.125), petX: middle.maxX)
+        let playing = composer.compose(
+            now: now, calendar: fixedCalendar(), pet: .placeholder,
+            battery: BatterySnapshot(isPresent: true, percentage: 0.8, isCharging: false),
+            brightness: (0.5, true), volume: (0.4, false, true), media: .unknown,
+            game: game, gameBestRounds: 3
+        )
+        XCTAssertEqual(playing.game, game)
+        XCTAssertEqual(playing.ballX, game.ballX)
+        XCTAssertNotEqual(playing.ballX, nookX)
+        XCTAssertEqual(playing.gameBestRounds, 3)
+
+        // The game belongs to the world page only.
+        let controls = SceneComposer(layout: layout.with(page: .controls)).compose(
+            now: now, calendar: fixedCalendar(), pet: .placeholder,
+            battery: BatterySnapshot(isPresent: true, percentage: 0.8, isCharging: false),
+            brightness: (0.5, true), volume: (0.4, false, true), media: .unknown,
+            game: game
+        )
+        XCTAssertNil(controls.game)
+    }
 }
