@@ -94,6 +94,7 @@ public enum PetSprites {
         var hat: CGFloat? = nil         // hard hat; value = lift above the head
         var spanner = false
         var spannerTilt: CGFloat = 0
+        var racket: Int? = nil          // tennis racket; value = swing step 0…3
         var bodyHidden = false          // teleport: only the poof is drawn
         var poof = 0                    // teleport sparkle burst radius step (0 = none)
     }
@@ -187,6 +188,16 @@ public enum PetSprites {
             p.eyes = f == 2 ? .closed : .side
             p.mouth = f == 1 || f == 3 ? .smile : .small
             p.bodyDY = f == 1 || f == 3 ? -1 : 0
+        case .swing:
+            // Backswing high, then the racket sweeps forward and down; the
+            // body leans into the shot at contact.
+            p.racket = f
+            p.eyes = f == 2 ? .squint : .open
+            p.mouth = f == 2 ? .open : .small
+            p.lean = [-1, 0, 2, 1][f]
+            p.bodyDX = f == 2 ? 1 : 0
+            p.bodyDY = f == 2 ? -1 : 0
+            p.earLift = f >= 2 ? 1 : 0
         case .teleportOut:
             p = teleportPose(step: f)
         case .teleportIn:
@@ -284,6 +295,32 @@ public enum PetSprites {
         ctx.fill(CGRect(x: hx - 1, y: brimY - 1, width: hatW + 2, height: 3))
         ctx.setFillColor(Palette.golden)
         ctx.fill(CGRect(x: hx, y: brimY, width: hatW, height: 1))
+    }
+
+    /// Tennis racket held at `hand` on the facing side, swept through the
+    /// swing by `step`: raised high (0), cocked (1), forward at contact
+    /// (2), down on the follow-through (3). The cell mirrors it for a
+    /// left-facing pet. `hand` should sit about four points inside the
+    /// facing edge of the body so the raised racket clears the face and the
+    /// 7-point racket at contact stays inside the 24-point cell.
+    static func drawRacket(_ ctx: CGContext, hand: CGPoint, step: Int) {
+        let degrees: [CGFloat] = [-88, -55, -28, 32]
+        let angle = degrees[max(0, min(3, step))] * .pi / 180
+        ctx.saveGState()
+        ctx.translateBy(x: hand.x, y: hand.y)
+        ctx.rotate(by: angle)
+        ctx.setShouldAntialias(true)
+        // Handle from the paw, then the head with strings.
+        ctx.setFillColor(outline)
+        ctx.fill(CGRect(x: -1, y: -0.75, width: 3, height: 1.5))
+        ctx.fillEllipse(in: CGRect(x: 1.5, y: -2.75, width: 5.5, height: 5.5))
+        ctx.setFillColor(CGColor(red: 0.85, green: 0.80, blue: 0.62, alpha: 1))
+        ctx.fillEllipse(in: CGRect(x: 2.5, y: -1.75, width: 3.5, height: 3.5))
+        ctx.setFillColor(outline.copy(alpha: 0.45) ?? outline)
+        ctx.fill(CGRect(x: 3.5, y: -1.75, width: 0.5, height: 3.5))
+        ctx.fill(CGRect(x: 4.75, y: -1.75, width: 0.5, height: 3.5))
+        ctx.fill(CGRect(x: 2.5, y: -0.25, width: 3.5, height: 0.5))
+        ctx.restoreGState()
     }
 
     /// Speed lines trail behind a dashing pet, at the left (back) edge.

@@ -153,6 +153,12 @@ enum EldritchEyeSprite: PetSpeciesDrawer {
             ctx.setFillColor(outline)
             ctx.fill(CGRect(x: sx + 6, y: sy, width: 1, height: 2))
         }
+        // Racket curled in a front tentacle for the court swing.
+        if let step = p.racket {
+            ctx.setFillColor(outline)
+            ctx.fill(CGRect(x: ball.maxX - 3, y: ball.midY + 2, width: 3, height: 4))   // the holding tentacle
+            PetSprites.drawRacket(ctx, hand: CGPoint(x: ball.maxX - 3, y: ball.midY + 3), step: step)
+        }
 
         if p.speedLines {
             PetSprites.drawSpeedLines(ctx, topY: by + 4)

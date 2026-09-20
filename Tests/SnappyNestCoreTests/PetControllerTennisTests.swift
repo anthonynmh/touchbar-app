@@ -58,7 +58,7 @@ final class PetControllerTennisTests: XCTestCase {
         while now.timeIntervalSince(served) < 6 {
             now = now.addingTimeInterval(0.125)
             c.tick(now: now, media: .unknown)
-            if c.state.action == .jump { sawJump = true; break }
+            if c.state.action == .swing { sawJump = true; break }
         }
         XCTAssertTrue(sawJump, "the pet swung at the ball")
         XCTAssertEqual(c.tennis?.rally, 2)

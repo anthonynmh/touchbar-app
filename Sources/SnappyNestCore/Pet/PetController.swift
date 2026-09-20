@@ -396,7 +396,7 @@ public final class PetController {
         tennis = g
         switch event {
         case .petHit:
-            hold(.jump, for: Self.swingHold, now: now)
+            hold(.swing, for: Self.swingHold, now: now)
         case .point(.pet, _):
             hold(.celebrate, for: TennisGame.pointHold, now: now)
         case .point(.user, _):

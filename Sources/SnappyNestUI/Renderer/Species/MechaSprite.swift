@@ -147,6 +147,10 @@ enum MechaSprite: PetSpeciesDrawer {
             ctx.setFillColor(Palette.cream)
             ctx.fill(CGRect(x: sx, y: sy - 8, width: 1, height: 8))                // hot core
         }
+        // Racket clamped in the front manipulator for the court swing.
+        if let step = p.racket {
+            PetSprites.drawRacket(ctx, hand: CGPoint(x: bx + bw - 3, y: by + 3), step: step)
+        }
 
         // Thrusters: a horizontal burst behind a dash, vertical ones under
         // the feet on stretched (airborne) frames.

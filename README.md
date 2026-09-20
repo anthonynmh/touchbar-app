@@ -155,7 +155,8 @@ Current build (`v0.1.0-dev`), verified on this Mac on 2026-09-18:
   right to serve or return — swipe speed is the shot's strength. Too weak
   lands in the net, too strong flies out past the far baseline, and a return
   you never swing at rolls off your baseline; each loses the point. The pet
-  runs to the landing spot and hits back, aiming worse as the rally goes on.
+  runs to the landing spot and swings a racket at it, aiming worse as the
+  rally goes on.
   First to 2 points wins the match (best of 3); the win/loss tally persists.
   Tap EXIT at any time (or idle on the serve for 45 s) to return to the world.
 - ✅ `LayoutEngine.Page` models the pages; `PetController.Mode` (roam,

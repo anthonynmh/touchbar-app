@@ -135,10 +135,11 @@ same notes. Keep all content here; do not duplicate it in `CLAUDE.md`.
   velocity to strength 0…1 via `TennisGame.fullStrengthVelocity`. The camera
   never drags on the court, so the only ways out are the EXIT sign, the
   45 s serve idle timeout in `AppDelegate`, and a page teleport
-  (`beginTransition` drops the match). `fullStrengthVelocity` (1400 pt/s) is
-  a paper value: measure what `NSPanGestureRecognizer.velocity(in:)` reports
-  for a comfortable Touch Bar flick and retune it, `maxRange` and
-  `flightSpeed` together.
+  (`beginTransition` drops the match). `fullStrengthVelocity` started at
+  1400 pt/s and a short flick already overshot the court on hardware; it is
+  2800 now. Retune it, `maxRange` and `flightSpeed` together from what
+  `NSPanGestureRecognizer.velocity(in:)` reports (the app logs each swing's
+  strength).
 - `TennisGame` is a pure struct: flights and bounces are functions of the
   injected `now` (`ballPosition(at:)`), so the 8 Hz sprite timer ticks the
   controller while the page is `.court` and the renderer glides the ball
@@ -148,8 +149,14 @@ same notes. Keep all content here; do not duplicate it in `CLAUDE.md`.
 - The rally limiter is the pet's aim: `petAimSigma(rally)` grows 14 pt per
   hit, so a perfect user eventually wins the point on a pet error. The user
   wins outright by landing deeper than the pet can run in the flight time
-  (`petSpeed` 90 pt/s after `petReaction` 0.25 s from `petHomeX`); from the
-  serve that is roughly strength 0.87–0.94, just inside the baseline.
+  (`petSpeed` 120 pt/s after `petReaction` 0.25 s from `petHomeX`); from
+  the serve that is roughly strength 0.91–0.94, just inside the baseline.
+- The pet's return is the `.swing` clip (4 frames at 10 fps, never
+  scheduled): `Pose.racket` carries the swing step and every species draws
+  `PetSprites.drawRacket` from a hand about four points inside its facing
+  edge. The racket is 7 points long because the 24-point cell has no room
+  for more at the contact frame; a wider cell would ripple into the trail
+  insets, hit rects and every `spriteHalfWidth: 12` in the tests.
 - The court image (`CourtPainter`) is cached per `SkyPainter.Key` and dims
   with `time.daylight`; the net is painted into it (a `CAShapeLayer` net at
   2 pt was invisible on the 7 pt surface band). The pet's feet stay on the
@@ -325,3 +332,7 @@ same notes. Keep all content here; do not duplicate it in `CLAUDE.md`.
   (best of 3) with a persisted W/L tally; EXIT sign, idle timeout or a page
   teleport leave. `CourtPainter` draws the court under the live sky. 205
   tests (201 + 4 snapshot writers). Hardware verification pending.
+- 2026-09-20 — Tennis tuning after the first hardware play: pet run speed
+  90 → 120 pt/s, strong shots faster (`flightSpeed` 220 + 340·s), swipe
+  scale halved (`fullStrengthVelocity` 1400 → 2800 pt/s) because a short
+  flick overshot the court. The pet now returns with a racket (`.swing`).

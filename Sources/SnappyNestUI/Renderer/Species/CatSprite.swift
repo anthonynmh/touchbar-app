@@ -130,6 +130,11 @@ enum CatSprite: PetSpeciesDrawer {
             ctx.fill(CGRect(x: sx + 6, y: sy, width: 1, height: 2))   // open jaw
         }
 
+        // Racket in the front paw for the court swing.
+        if let step = p.racket {
+            PetSprites.drawRacket(ctx, hand: CGPoint(x: body.maxX - 4, y: body.midY + 1), step: step)
+        }
+
         // Hard hat: a golden dome with a brim, sitting on the head between the
         // ears. `lift` raises it for the drop-on / pop-off clips.
         if let lift = p.hat {

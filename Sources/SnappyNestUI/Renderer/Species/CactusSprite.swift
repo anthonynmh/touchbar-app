@@ -153,6 +153,10 @@ enum CactusSprite: PetSpeciesDrawer {
             ctx.setFillColor(outline)
             ctx.fill(CGRect(x: sx + 6, y: sy, width: 1, height: 2))
         }
+        // Racket in the front arm for the court swing.
+        if let step = p.racket {
+            PetSprites.drawRacket(ctx, hand: CGPoint(x: bx + bw - 2, y: by + 5), step: step)
+        }
 
         if p.speedLines {
             PetSprites.drawSpeedLines(ctx, topY: by + 4)

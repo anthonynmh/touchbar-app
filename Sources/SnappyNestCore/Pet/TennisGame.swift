@@ -64,8 +64,9 @@ public struct TennisGame: Equatable {
     public static let netMargin: CGFloat = 20
     /// Drawn net height above the ground line.
     public static let netHeight: CGFloat = 8
-    /// Pan velocity (pt/s) that maps to full strength.
-    public static let fullStrengthVelocity: CGFloat = 1400
+    /// Pan velocity (pt/s) that maps to full strength. A comfortable flick
+    /// should land mid-court, so this sits well above a casual swipe.
+    public static let fullStrengthVelocity: CGFloat = 2800
     /// Shorter swipes are not a swing.
     public static let minSwipeDistance: CGFloat = 16
     public static let serveInset: CGFloat = 24
@@ -73,7 +74,8 @@ public struct TennisGame: Equatable {
     public static let bounceHopDuration: TimeInterval = 0.5
     /// The ball is lost once it rolls this far past the user's baseline.
     public static let baselineSlack: CGFloat = 6
-    public static let petSpeed: CGFloat = 90
+    /// Quick enough that only a deep shot near the baseline gets past it.
+    public static let petSpeed: CGFloat = 120
     public static let petReaction: TimeInterval = 0.25
     public static let petReach: CGFloat = 12
     public static let pointHold: TimeInterval = 1.4
@@ -81,7 +83,7 @@ public struct TennisGame: Equatable {
 
     /// Horizontal speed of a shot, points per second.
     public static func flightSpeed(strength: Double) -> CGFloat {
-        220 + 260 * CGFloat(min(1, max(0, strength)))
+        220 + 340 * CGFloat(min(1, max(0, strength)))
     }
 
     /// Visual apex of a shot of this range.
