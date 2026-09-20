@@ -12,11 +12,15 @@ import SnappyNestCore
 public enum SkyPainter {
     public struct Key: Hashable {
         public let minuteOfDay: Int
+        public let sunriseMinute: Int
+        public let sunsetMinute: Int
         public let width: Int
         public let height: Int
         public let scale: CGFloat
         public init(time: WorldTime, size: CGSize, scale: CGFloat) {
             minuteOfDay = time.hour * 60 + time.minute
+            sunriseMinute = Int(time.schedule.sunriseMinutes.rounded())
+            sunsetMinute = Int(time.schedule.sunsetMinutes.rounded())
             width = Int(size.width.rounded())
             height = Int(size.height.rounded())
             self.scale = scale
@@ -41,22 +45,50 @@ public enum SkyPainter {
         }
     }
 
-    /// (hour, zenith, horizon) keyframes; interpolated linearly, wrapping at 24.
-    private static let keyframes: [(hour: Double, zenith: RGB, horizon: RGB)] = [
-        (0.0,  RGB(0x070B1E), RGB(0x141C3A)),
-        (4.0,  RGB(0x0B1230), RGB(0x1E2A4E)),
-        (5.5,  RGB(0x1B2A55), RGB(0x6B4B5A)),
-        (6.5,  RGB(0x4A78B5), RGB(0xF2A65A)),
-        (8.0,  RGB(0x5FA3DB), RGB(0xBFE0F2)),
-        (12.0, RGB(0x3D8BD9), RGB(0xA8D8F0)),
-        (16.0, RGB(0x4A8FCF), RGB(0xD7C79A)),
-        (17.5, RGB(0x4C6FA8), RGB(0xF28C4A)),
-        (18.5, RGB(0x202C5C), RGB(0x7A4A62)),
-        (20.0, RGB(0x0D1637), RGB(0x2A3560)),
-        (24.0, RGB(0x070B1E), RGB(0x141C3A))
+    /// Where a colour keyframe sits relative to the day's schedule.
+    private enum Anchor {
+        case midnight, sunrise(Double), noon, sunset(Double), endOfDay
+
+        /// Hour of day for `schedule`. Offsets are clamped so the keyframes
+        /// stay ordered even on very short days or nights.
+        func hour(in schedule: SolarSchedule) -> Double {
+            let rise = schedule.sunriseMinutes / 60
+            let set = schedule.sunsetMinutes / 60
+            let noon = schedule.solarNoonMinutes / 60
+            let halfDay = (set - rise) / 2
+            switch self {
+            case .midnight: return 0
+            case .endOfDay: return 24
+            case .noon: return noon
+            case .sunrise(let offset):
+                if offset >= 0 { return rise + min(offset, halfDay * 0.9) }
+                return max(rise + offset, rise / 2)
+            case .sunset(let offset):
+                if offset <= 0 { return set + max(offset, -halfDay * 0.9) }
+                return min(set + offset, set + (24 - set) / 2)
+            }
+        }
+    }
+
+    /// Colour keyframes anchored to sunrise/sunset; interpolated linearly.
+    /// With `.stylized` (06:00 / 18:00) these fall at 0, 4, 5.5, 6.5, 8, 12,
+    /// 16, 17.5, 18.5, 20 and 24 hours.
+    private static let keyframes: [(anchor: Anchor, zenith: RGB, horizon: RGB)] = [
+        (.midnight,      RGB(0x070B1E), RGB(0x141C3A)),
+        (.sunrise(-2.0), RGB(0x0B1230), RGB(0x1E2A4E)),
+        (.sunrise(-0.5), RGB(0x1B2A55), RGB(0x6B4B5A)),
+        (.sunrise(0.5),  RGB(0x4A78B5), RGB(0xF2A65A)),
+        (.sunrise(2.0),  RGB(0x5FA3DB), RGB(0xBFE0F2)),
+        (.noon,          RGB(0x3D8BD9), RGB(0xA8D8F0)),
+        (.sunset(-2.0),  RGB(0x4A8FCF), RGB(0xD7C79A)),
+        (.sunset(-0.5),  RGB(0x4C6FA8), RGB(0xF28C4A)),
+        (.sunset(0.5),   RGB(0x202C5C), RGB(0x7A4A62)),
+        (.sunset(2.0),   RGB(0x0D1637), RGB(0x2A3560)),
+        (.endOfDay,      RGB(0x070B1E), RGB(0x141C3A))
     ]
 
     private static func skyColors(at time: WorldTime) -> (zenith: RGB, horizon: RGB) {
+        let keyframes = Self.keyframes.map { (hour: $0.anchor.hour(in: time.schedule), zenith: $0.zenith, horizon: $0.horizon) }
         let h = time.minutesOfDay / 60
         var i = 0
         while i + 1 < keyframes.count && keyframes[i + 1].hour < h { i += 1 }

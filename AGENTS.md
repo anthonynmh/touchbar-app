@@ -61,6 +61,23 @@ same notes. Keep all content here; do not duplicate it in `CLAUDE.md`.
 - The sky image is regenerated only when the minute changes
   (`SkyPainter.Key`); everything else is a cached per-state glyph, so a frame
   costs only layer `contents` swaps.
+- Day and night follow real sunrise/sunset, not the clock. `WorldTime`
+  carries a `SolarSchedule` (sunrise/sunset in minutes of the local day);
+  `isDaytime`, `dayProgress`, `nightProgress`, `daylight`, `twilight` and
+  the `SkyPainter` colour keyframes are all expressed relative to it. The
+  app resolves the schedule with `SolarScheduleCache`: the system zone's
+  identifier (`TimeZone.current.identifier`, e.g. `Asia/Singapore`) is
+  looked up in `/usr/share/zoneinfo/zone.tab` for the zone's reference-city
+  coordinates and fed to a NOAA sunrise/sunset formula, cached per
+  (zone, day). No CoreLocation, no permissions, no radios; the cost is one
+  file read per zone and one trig pass per day. Fixed-offset zones
+  (`GMT+8`, `UTC`) and polar day/night fall back to `.stylized`
+  (06:00 / 18:00), which is also the default for every `WorldTime` so
+  tests and snapshots stay deterministic. Accuracy is that of the zone's
+  reference city: exact for Singapore (06:55 / 19:02 on 2026-09-20 versus
+  the old 06:00 / 18:00), tens of minutes off at the far edges of wide
+  zones such as `America/Chicago`. `PetScheduler`'s hour-of-day action
+  weights deliberately stay on the wall clock.
 - Paging is a camera: the world and controls containers are full-width
   `CALayer`s whose `position.x` follows an `NSPanGestureRecognizer`
   (`allowedTouchTypes = .direct`) and snaps with a `CABasicAnimation`. The
@@ -245,3 +262,9 @@ same notes. Keep all content here; do not duplicate it in `CLAUDE.md`.
   Eldritch Eye — chosen from a 🐾 → Pet submenu and persisted with the
   media source choice. 157 tests (154 + 3 snapshot writers). Hardware
   verification pending.
+- 2026-09-20 — `feat/solar-schedule`: the sun/moon, sky and terrain now
+  follow real sunrise/sunset derived from the system time zone (zone.tab
+  reference coordinates + NOAA formula, cached per day) with the stylized
+  06:00 / 18:00 day as the default and fallback. The app logs
+  `[SnappyNest] solar tz=… coords=… sunrise=… sunset=…` at launch for
+  readback. 184 tests (181 + 3 snapshot writers). Hardware verification pending.

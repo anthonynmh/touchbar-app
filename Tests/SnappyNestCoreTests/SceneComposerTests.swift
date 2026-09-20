@@ -123,4 +123,16 @@ final class SceneComposerTests: XCTestCase {
         XCTAssertEqual(a.celestial, b.celestial)
         XCTAssertEqual(a.layout, b.layout)
     }
+
+    func testScheduleReachesModelAndMovesSunrise() {
+        let composer = SceneComposer(layout: LayoutEngine(bounds: bounds, backingScale: 2.0))
+        let late = SolarSchedule(sunriseMinutes: 13 * 60, sunsetMinutes: 20 * 60)
+        let model = composer.compose(
+            now: noonUTC(), calendar: fixedCalendar(), schedule: late, pet: .placeholder,
+            battery: BatterySnapshot(isPresent: true, percentage: 0.8, isCharging: false),
+            brightness: (0.5, true), volume: (0.4, false, true), media: .unknown
+        )
+        XCTAssertEqual(model.time.schedule, late)
+        XCTAssertEqual(model.celestial.body, .moon)
+    }
 }
