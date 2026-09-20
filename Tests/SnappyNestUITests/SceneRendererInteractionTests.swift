@@ -386,29 +386,39 @@ final class SceneRendererInteractionTests: XCTestCase {
         XCTAssertEqual(zoneTaps, 2)
     }
 
-    func testBallTapKicksOnlyDuringPlayAndOutranksThePet() {
+    func testAnyGroundTapKicksDuringPlayAndTheNookStillExits() {
         let renderer = makeRenderer()
         let idle = makeModel(page: .world)
         renderer.update(model: idle)
-        var ballTaps: [CGFloat] = []
-        var groundTaps = 0, petTaps = 0
-        renderer.onBallTap = { ballTaps.append($0) }
+        var kicks: [CGFloat] = []
+        var groundTaps = 0, petTaps = 0, zoneTaps = 0
+        renderer.onKick = { kicks.append($0) }
         renderer.onGroundTap = { _ in groundTaps += 1 }
         renderer.onPetTap = { petTaps += 1 }
+        renderer.onActivityZoneTap = { zoneTaps += 1 }
 
-        // The resting ball is scenery until a game runs (it sits in the
-        // nook, so that tap is the zone's; probe a point off the nook).
-        let game = servedGame(world: idle.layout.middle)
-        let ball = game.ballHitRect()
-        renderer.handleTap(at: CGPoint(x: ball.midX, y: ball.midY))
-        XCTAssertEqual(ballTaps, [])
+        // No game: ground is ground, the pet is the pet.
+        let middle = idle.layout.middle
+        renderer.handleTap(at: CGPoint(x: middle.maxX - 30, y: 20))
+        XCTAssertEqual(kicks, [])
         XCTAssertEqual(groundTaps, 1)
 
-        renderer.update(model: makeModel(page: .world, game: game, petX: ball.midX))
-        renderer.handleTap(at: CGPoint(x: ball.minX + 1, y: ball.midY))
-        XCTAssertEqual(ballTaps, [ball.minX + 1])
-        XCTAssertEqual(petTaps, 0, "the ball outranks the pet standing on it")
-        renderer.handleTap(at: CGPoint(x: ball.maxX + 4, y: ball.midY))
-        XCTAssertEqual(petTaps, 1, "beside the ball the pet is still tappable")
+        let game = servedGame(world: middle)
+        let pet = makeModel(page: .world, game: game, petX: middle.maxX - 100)
+        renderer.update(model: pet)
+        let petRect = pet.pet.hitRect(spriteSize: PetSprites.cellSize)
+        let ball = game.ballRect()
+        renderer.handleTap(at: CGPoint(x: middle.maxX - 30, y: 20))    // empty ground
+        renderer.handleTap(at: CGPoint(x: petRect.midX, y: petRect.midY)) // the pet
+        renderer.handleTap(at: CGPoint(x: ball.midX, y: ball.midY))     // the ball itself
+        XCTAssertEqual(kicks, [middle.maxX - 30, petRect.midX, ball.midX],
+                       "during play every ground tap is a kick, whatever it lands on")
+        XCTAssertEqual([groundTaps, petTaps], [1, 0])
+
+        // The nook still exits, and the sun still shows the clock.
+        let zone = SceneLayout.activityZone(inside: middle)
+        renderer.handleTap(at: CGPoint(x: zone.midX, y: zone.midY))
+        XCTAssertEqual(zoneTaps, 1)
+        XCTAssertEqual(kicks.count, 3)
     }
 }

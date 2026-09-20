@@ -33,32 +33,58 @@ final class KeepAwayGameTests: XCTestCase {
         XCTAssertEqual(onNook.ballVX, KeepAwayGame.kickSpeed, "pet on the nook: toward the roomier side")
     }
 
-    func testKickSendsTheBallAwayFromTheTappedSide() {
-        var (g, now) = servedGame()
-        let x = g.ballX
-        XCTAssertTrue(g.kick(atX: x - 3, now: now))
-        XCTAssertEqual(g.ballVX, KeepAwayGame.kickSpeed, "tap left of centre kicks right")
-        XCTAssertTrue(g.kick(atX: x + 3, now: now))
-        XCTAssertEqual(g.ballVX, -KeepAwayGame.kickSpeed, "tap right of centre kicks left")
+    /// Tick a served game until the ball is slow enough to kick again.
+    private func settle(_ g: inout KeepAwayGame, from start: Date) -> (Date, Int) {
+        var now = start
+        var ticks = 0
+        while !g.isKickable {
+            now = now.addingTimeInterval(0.125)
+            _ = g.tick(dt: 0.125, now: now, petX: 20)
+            ticks += 1
+            XCTAssertLessThan(ticks, 100, "the ball never slowed down")
+        }
+        return (now, ticks)
+    }
+
+    func testKickRollsTheBallTowardTheTappedSide() {
+        var (g, served) = servedGame()
+        var (now, _) = settle(&g, from: served)
+        XCTAssertTrue(g.kick(atX: 20, petX: 20, now: now), "a tap far left of the ball")
+        XCTAssertEqual(g.ballVX, -KeepAwayGame.kickSpeed, "rolls left")
         XCTAssertEqual(g.petBlockedUntil, now.addingTimeInterval(KeepAwayGame.petReaction(round: 1)))
-        now = now.addingTimeInterval(0.125)
-        XCTAssertNil(g.petTargetX(at: now), "the pet is stunned after a kick")
+        (now, _) = settle(&g, from: now)
+        XCTAssertTrue(g.kick(atX: 900, petX: 20, now: now), "a tap far right of the ball")
+        XCTAssertEqual(g.ballVX, KeepAwayGame.kickSpeed, "rolls right")
+        XCTAssertNil(g.petTargetX(at: now.addingTimeInterval(0.125)), "the pet is stunned after a kick")
         XCTAssertEqual(g.petTargetX(at: now.addingTimeInterval(1)), g.ballX)
     }
 
-    func testKickMissesOutsideTheInflatedBallRect() {
-        let (g0, now) = servedGame()
-        var g = g0
-        let hit = g.ballHitRect()
-        XCTAssertEqual(hit.width, KeepAwayGame.ballSize.width + 2 * KeepAwayGame.ballTapSlop)
-        XCTAssertFalse(g.kick(atX: hit.maxX + 1, now: now))
-        XCTAssertFalse(g.kick(atX: hit.minX - 1, now: now))
-        XCTAssertTrue(g.kick(atX: hit.maxX - 0.5, now: now))
+    func testTapOnTheBallRollsItAwayFromThePet() {
+        var (g, served) = servedGame()
+        let (now, _) = settle(&g, from: served)
+        var left = g
+        XCTAssertTrue(left.kick(atX: left.ballX, petX: left.ballX - 100, now: now))
+        XCTAssertEqual(left.ballVX, KeepAwayGame.kickSpeed, "pet on the left: away to the right")
+        var right = g
+        XCTAssertTrue(right.kick(atX: right.ballX + 0.5, petX: right.ballX + 100, now: now))
+        XCTAssertEqual(right.ballVX, -KeepAwayGame.kickSpeed, "pet on the right: away to the left")
+    }
+
+    func testRollingBallCannotBeKickedUntilItSlows() {
+        var (g, served) = servedGame()
+        XCTAssertFalse(g.isKickable, "just served")
+        XCTAssertFalse(g.kick(atX: 900, petX: 20, now: served), "a dead tap")
+        XCTAssertEqual(g.ballVX, KeepAwayGame.kickSpeed, "the serve was not redirected")
+        XCTAssertNil(g.petBlockedUntil, "and the pet was not stunned for free")
+        let (_, ticks) = settle(&g, from: served)
+        XCTAssertEqual(ticks, 26, "kickable about 3.2 s after a full-speed kick")
+        XCTAssertLessThan(abs(g.ballVX), KeepAwayGame.kickableSpeed)
+        XCTAssertGreaterThan(abs(g.ballVX), 0, "still rolling, just slowly")
     }
 
     func testKickIsIgnoredOutsidePlay() {
         var g = KeepAwayGame(arena: arena, nookX: nookX, now: t0)
-        XCTAssertFalse(g.kick(atX: g.ballX, now: t0), "still in the nook")
+        XCTAssertFalse(g.kick(atX: g.ballX, petX: 20, now: t0), "still in the nook")
         XCTAssertEqual(g.ballVX, 0)
     }
 
@@ -97,7 +123,7 @@ final class KeepAwayGameTests: XCTestCase {
         XCTAssertTrue(g.isOver)
         XCTAssertEqual(g.ballVX, 0)
         XCTAssertEqual(g.roundsSurvived, 0)
-        XCTAssertFalse(g.kick(atX: g.ballX, now: now), "no kicks once caught")
+        XCTAssertFalse(g.kick(atX: 900, petX: 0, now: now), "no kicks once caught")
         XCTAssertNil(g.tick(dt: 0.125, now: now.addingTimeInterval(1), petX: 0))
         XCTAssertEqual(g.tick(dt: 0.125, now: now.addingTimeInterval(KeepAwayGame.lostHold + 0.5), petX: 0), .finished)
     }

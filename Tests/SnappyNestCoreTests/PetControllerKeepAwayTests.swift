@@ -76,10 +76,17 @@ final class PetControllerKeepAwayTests: XCTestCase {
 
     func testKickStunsThePetThenItResumesTheChase() {
         let (c, served) = servedController()
-        var now = served.addingTimeInterval(0.125)
-        c.tick(now: now, media: .unknown)
+        var now = served
+        XCTAssertFalse(c.kickBall(atX: 20, now: now), "a dead tap on the freshly served ball")
+        XCTAssertEqual(c.state.action, .dash, "no stun for free")
+        while c.game?.isKickable != true {
+            now = now.addingTimeInterval(0.125)
+            c.tick(now: now, media: .unknown)
+            XCTAssertLessThan(now.timeIntervalSince(served), 6)
+        }
         let ballX = c.game!.ballX
-        XCTAssertTrue(c.kickBall(atX: ballX - 2, now: now))
+        XCTAssertTrue(c.kickBall(atX: ballX - 100, now: now))
+        XCTAssertEqual(c.game?.ballVX, -KeepAwayGame.kickSpeed, "toward the tap")
         XCTAssertEqual(c.state.action, .surprised)
         let stunnedAt = c.state.position.x
         now = now.addingTimeInterval(0.125)
@@ -91,8 +98,6 @@ final class PetControllerKeepAwayTests: XCTestCase {
         c.tick(now: now, media: .unknown)
         XCTAssertEqual(c.state.action, .dash)
         XCTAssertNotEqual(c.state.position.x, stunnedAt)
-
-        XCTAssertFalse(c.kickBall(atX: ballX + 500, now: now), "a miss is not a kick")
     }
 
     func testPetAndGroundTapsAreIgnoredDuringTheGameAndWorkAfter() {
@@ -142,8 +147,9 @@ final class PetControllerKeepAwayTests: XCTestCase {
         while c.game?.round == 1, c.game?.isPlaying == true {
             now = now.addingTimeInterval(0.125)
             c.tick(now: now, media: .unknown)
-            if let g = c.game, g.isPlaying, abs(c.state.position.x - g.ballX) < 40 {
-                let side: CGFloat = c.state.position.x < g.ballX ? -2 : 2
+            if let g = c.game, g.isKickable, abs(c.state.position.x - g.ballX) < 80 {
+                // Tap on the far side of the ball from the pet.
+                let side: CGFloat = c.state.position.x < g.ballX ? 50 : -50
                 c.kickBall(atX: g.ballX + side, now: now)
             }
             XCTAssertLessThan(now.timeIntervalSince(served), 12)

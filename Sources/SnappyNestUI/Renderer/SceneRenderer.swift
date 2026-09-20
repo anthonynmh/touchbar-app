@@ -90,8 +90,9 @@ public final class SceneRenderer: NSView {
     public var onGroundTap:        ((CGFloat) -> Void)?
     /// World page: the nook was tapped (start or leave keep-away).
     public var onActivityZoneTap:  (() -> Void)?
-    /// World page, during keep-away: the ball was tapped at this strip `x`.
-    public var onBallTap:          ((CGFloat) -> Void)?
+    /// World page, during keep-away: the ground was tapped at this strip
+    /// `x`; the ball is kicked toward that side.
+    public var onKick:             ((CGFloat) -> Void)?
     /// Playback page: a tap on the trail asks for a seek to this fraction.
     public var onSeek:             ((Double) -> Void)?
     public var onNextTrack:        (() -> Void)?
@@ -601,7 +602,7 @@ public final class SceneRenderer: NSView {
     private func paintGame(model: SceneModel, regions: LayoutEngine.Regions) {
         let size = PlaceholderSprites.ballSize
         ballLayer.magnificationFilter = .linear
-        ballLayer.contents = PlaceholderSprites.ballImage(scale: backingScale)
+        ballLayer.contents = PlaceholderSprites.ballImage(scale: backingScale, ready: model.game?.isKickable ?? false)
         let groundY = regions.middle.maxY - 4
         let frame = CGRect(x: model.ballX - size.width / 2, y: groundY - size.height + (model.game == nil ? 1 : 0),
                            width: size.width, height: size.height)
@@ -832,14 +833,15 @@ public final class SceneRenderer: NSView {
                 onVolumeChange?(fraction(x: point.x, in: trackRect(regions.volume)))
             }
         case .world:
-            // The ball outranks the pet because the two overlap at the catch;
-            // the nook outranks the pet so the exit tap always lands.
+            // The nook outranks the pet so the exit tap always lands. While
+            // the ball is in play the whole ground (pet included) is the
+            // kick surface.
             if celestialRect(model.celestial).insetBy(dx: -Self.tapSlop, dy: -Self.tapSlop).contains(point) {
                 revealClock()
-            } else if let game = model.game, game.isPlaying, game.ballHitRect().contains(point) {
-                onBallTap?(point.x)
             } else if activityZoneRect(regions).contains(point) {
                 onActivityZoneTap?()
+            } else if let game = model.game, game.isPlaying, regions.middle.contains(point) {
+                onKick?(point.x)
             } else if petHitRect(model.pet).contains(point) {
                 onPetTap?()
             } else if regions.middle.contains(point) {

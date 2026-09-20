@@ -131,7 +131,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSLog("[SnappyNest] keep-away %@", self.pet.isPlayingGame ? "started" : "ended")
             self.renderOnce()
         }
-        renderer.onBallTap = { [weak self] x in
+        renderer.onKick = { [weak self] x in
             guard let self else { return }
             self.pet.kickBall(atX: x, now: self.clock.now)
             self.renderOnce()

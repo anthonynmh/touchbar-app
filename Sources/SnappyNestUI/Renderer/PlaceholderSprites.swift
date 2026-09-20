@@ -54,12 +54,14 @@ public enum PlaceholderSprites {
         }
     }
 
-    /// The keep-away ball: a 6-point rubber ball with a highlight.
-    public static func ballImage(scale: CGFloat) -> CGImage {
-        cached("ball@\(scale)") {
+    /// The keep-away ball: a 6-point rubber ball with a highlight. `ready`
+    /// swaps the dark outline for a cream ring — the cue that a tap will
+    /// kick it.
+    public static func ballImage(scale: CGFloat, ready: Bool = false) -> CGImage {
+        cached("ball\(ready ? "-ready" : "")@\(scale)") {
             PetSprites.render(size: ballSize, scale: scale) { ctx in
                 ctx.setShouldAntialias(true)
-                ctx.setFillColor(Palette.brown)
+                ctx.setFillColor(ready ? Palette.cream : Palette.brown)
                 ctx.fillEllipse(in: CGRect(x: 0, y: 0, width: 6, height: 6))
                 ctx.setFillColor(CGColor(red: 0.90, green: 0.32, blue: 0.28, alpha: 1))
                 ctx.fillEllipse(in: CGRect(x: 1, y: 1, width: 4, height: 4))

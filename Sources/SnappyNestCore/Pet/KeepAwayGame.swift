@@ -3,9 +3,10 @@ import Foundation
 
 /// Keep-away: the world page's activity. A ball rests in a nook on the
 /// ground; tapping the nook serves it and the pet dashes for it. The user
-/// taps the ball to kick it away from the finger. Surviving a round timer
-/// wins the round (the pet gets faster), the pet reaching the ball wins the
-/// game.
+/// taps anywhere on the ground to kick the ball toward that side; a rolling
+/// ball cannot be kicked again until it slows, otherwise repeated taps
+/// would keep it away from the pet forever. Surviving a round timer wins
+/// the round (the pet gets faster), the pet reaching the ball wins the game.
 ///
 /// Pure state machine in strip coordinates: the controller feeds it `dt`,
 /// `now` and the pet's x, and maps the returned `Event` to pet actions. No
@@ -49,8 +50,9 @@ public struct KeepAwayGame: Equatable {
     public static let wallBounce: CGFloat = 0.5
     public static let catchDistance: CGFloat = 6
     public static let ballSize = CGSize(width: 6, height: 6)
-    /// The ball is tiny; the hit rect is inflated so a finger can find it.
-    public static let ballTapSlop: CGFloat = 8
+    /// A rolling ball accepts a kick again once it is slower than this
+    /// (about 3 s after a kick, roughly 175 pt down the ground).
+    public static let kickableSpeed: CGFloat = 15
     /// Edge inset the ball bounces off, so it never leaves the terrain.
     public static let wallInset: CGFloat = 3
     /// Below this speed the ball is considered stopped.
@@ -123,18 +125,24 @@ public struct KeepAwayGame: Equatable {
                width: Self.ballSize.width, height: Self.ballSize.height)
     }
 
-    public func ballHitRect(slop: CGFloat = KeepAwayGame.ballTapSlop) -> CGRect {
-        ballRect().insetBy(dx: -slop, dy: -slop)
+    /// True while a tap would land: in play and the ball is slow enough.
+    public var isKickable: Bool {
+        isPlaying && abs(ballVX) < Self.kickableSpeed
     }
 
-    /// Kick the ball away from the tapped side (a tap left of centre sends it
-    /// right). Only lands during play and on the inflated ball rect.
+    /// Kick the ball toward the tapped side of the ground (a tap left of
+    /// the ball sends it left). A tap right on the ball rolls it away from
+    /// the pet. Only lands while `isKickable`.
     @discardableResult
-    public mutating func kick(atX x: CGFloat, now: Date) -> Bool {
-        guard isPlaying else { return false }
-        let hit = ballHitRect()
-        guard x >= hit.minX && x <= hit.maxX else { return false }
-        ballVX = x <= ballX ? Self.kickSpeed : -Self.kickSpeed
+    public mutating func kick(atX x: CGFloat, petX: CGFloat, now: Date) -> Bool {
+        guard isKickable else { return false }
+        let direction: CGFloat
+        if abs(x - ballX) <= 1 {
+            direction = petX < ballX ? 1 : -1
+        } else {
+            direction = x < ballX ? -1 : 1
+        }
+        ballVX = Self.kickSpeed * direction
         petBlockedUntil = now.addingTimeInterval(Self.petReaction(round: round))
         return true
     }

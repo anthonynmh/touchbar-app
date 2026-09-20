@@ -384,11 +384,12 @@ public final class PetController {
         state.frameIndex = 0
     }
 
-    /// The user tapped the ball at strip `x`. A landed kick stuns the pet
-    /// for the round's reaction time (it plays `.surprised`).
+    /// The user tapped the ground at strip `x` during a game: the ball is
+    /// kicked toward that side if it is slow enough. A landed kick stuns the
+    /// pet for the round's reaction time (it plays `.surprised`).
     @discardableResult
     public func kickBall(atX x: CGFloat, now: Date) -> Bool {
-        guard var g = game, g.kick(atX: x, now: now) else { return false }
+        guard var g = game, g.kick(atX: x, petX: state.position.x, now: now) else { return false }
         game = g
         targetX = nil
         state.action = .surprised

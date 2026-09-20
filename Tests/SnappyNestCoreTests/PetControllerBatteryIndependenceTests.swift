@@ -23,9 +23,7 @@ final class PetControllerBatteryIndependenceTests: XCTestCase {
                 let now = start.addingTimeInterval(TimeInterval(step))
                 // A keep-away game in the middle of the run: still no battery.
                 if step == 120 { controller.toggleKeepAway(now: now) }
-                if step == 130, let ball = controller.game?.ballX {
-                    controller.kickBall(atX: ball - 1, now: now)
-                }
+                if step == 130 { controller.kickBall(atX: 900, now: now) }
                 controller.tick(now: now, media: .unknown)
                 actions.append(controller.state.action)
                 _ = battery // reference retained to prove the pattern lives in scope

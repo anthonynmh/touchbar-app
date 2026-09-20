@@ -125,11 +125,20 @@ same notes. Keep all content here; do not duplicate it in `CLAUDE.md`.
 
 - Keep-away (`KeepAwayGame`) is taps only. The camera pan, the pet tap and
   the ground tap are all already claimed on the world page, so the game adds
-  two tap targets — the nook (`SceneLayout.activityZone`) and the ball
-  (`KeepAwayGame.ballHitRect`, inflated by 8 pt) — and nothing else. World
-  page hit order is sun/moon → ball (only while playing) → nook → pet →
-  ground: the ball outranks the pet because they overlap at the catch, and
-  the nook outranks the pet so the exit tap lands even with the pet on it.
+  one tap target — the nook (`SceneLayout.activityZone`) — and, while the
+  ball is in play, turns the whole ground into the kick surface. World page
+  hit order is sun/moon → nook → (playing: any point in `middle` → kick) →
+  pet → ground; the nook outranks everything but the sun so the exit tap
+  lands even with the pet on it.
+- The first version aimed a kick by which half of the 6 pt ball was tapped;
+  users could not pinpoint a side on the Touch Bar. A kick now rolls the
+  ball toward the side of the ball the tap landed on, anywhere on the
+  ground (a tap right on the ball rolls it away from the pet). Because the
+  ball (120 pt/s) outruns the pet (≤ 45 pt/s), unlimited kicks would make a
+  loss impossible, so a rolling ball only accepts a kick once it is slower
+  than `KeepAwayGame.kickableSpeed` (≈ 3 s after a kick). The ball swaps to
+  a cream ring (`PlaceholderSprites.ballImage(ready:)`) while kickable so a
+  dead tap is understandable; a dead tap never stuns the pet.
 - The game runs inside `PetController.Mode.roam`, not as a mode of its own,
   so the page-change teleport is unchanged; `beginTransition` ends the game
   first. Pet and ground taps are ignored only while `game != nil` (a pet
@@ -305,3 +314,7 @@ same notes. Keep all content here; do not duplicate it in `CLAUDE.md`.
   battery was already decoupled from the pet (no controller/scheduler
   input; acceptance test extended to cover a game). 209 tests (205 + 4
   snapshot writers). Hardware verification pending.
+- 2026-09-20 — Keep-away kick input reworked: tap anywhere on the ground to
+  roll the ball toward that side; a rolling ball is only kickable once it
+  slows (ring cue). 210 tests (206 + 4 snapshot writers). Hardware
+  verification pending.

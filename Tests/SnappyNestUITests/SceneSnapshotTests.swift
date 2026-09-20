@@ -194,9 +194,12 @@ final class SceneSnapshotTests: XCTestCase {
 
         let middle = layout.regions.middle
         var game = KeepAwayGame(arena: middle, nookX: SceneLayout.nookX(inside: middle), now: now)
-        for i in 0...10 {
+        var i = 0
+        repeat {
             _ = game.tick(dt: 0.125, now: now.addingTimeInterval(1 + 0.125 * Double(i)), petX: middle.midX + 100)
-        }
+            i += 1
+        } while !game.isKickable && i < 100
+        XCTAssertTrue(game.isKickable, "the chase frame shows the ready ring")
         let chasing = PetState(action: .dash, facing: .left,
                                position: CGPoint(x: game.ballX + 70, y: middle.maxY - 4), frameIndex: 1)
         let mid = composer.compose(
